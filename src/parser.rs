@@ -7,8 +7,6 @@ pub struct Parser<'src> {
     source: &'src str,
     tokens: Vec<Token>,
     cursor: usize,
-    // for error message
-    error: Vec<ParseError>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,7 +17,8 @@ pub enum ParseError {
     UnknownBuiltin(Span, InternStr),
 }
 
-type ParseFunc<T> = fn(&mut Parser) -> Option<T>;
+type ParseResult<T> = Result<T,ParseError>;
+type ParseFunc<T> = fn(&mut Parser) -> ParseResult<T>;
 
 impl<'src> Parser<'src> {
     pub fn new(input: &'src str) -> Parser<'src> {
@@ -29,7 +28,6 @@ impl<'src> Parser<'src> {
             source: input,
             tokens: tokens,
             cursor: 0,
-            error: Vec::new(),
         }
     }
 
@@ -45,6 +43,11 @@ impl<'src> Parser<'src> {
         &self.tokens[self.cursor].span
     }
 
+    fn peek_slice(&self) -> &'src str {
+        let span = &self.tokens[self.cursor].span;
+        &self.source[span.start.abs .. span.end.abs]
+    }
+
     fn start_pos(&self) -> Position {
         self.tokens[self.cursor].span.start
     }
@@ -53,98 +56,115 @@ impl<'src> Parser<'src> {
         self.tokens[self.cursor - 1].span.end
     }
 
-    fn peek_slice(&self) -> &'src str {
-        let span = &self.tokens[self.cursor].span;
-        let start = span.start.abs;
-        let end = span.end.abs;
-        &self.source[start..end]
-    }
-
     fn next_token(&mut self) -> &Token {
         let tok = &self.tokens[self.cursor];
-        if self.cursor < self.tokens.len() {
+        if self.cursor < self.tokens.len() - 1 {
             self.cursor += 1;
         }
         tok
     }
 
-    fn emit_unexpected(&mut self, token: TokenKind) {
+    fn err_unexpected(&mut self, token: TokenKind) -> ParseError {
         let Token { kind, span } = self.peek_token();
-        let err = ParseError::Unexpected(*span, *kind, token);
-        self.error.push(err);
+        ParseError::Unexpected(*span, *kind, token)
     }
 
-    fn emit_unexpected_many(&mut self, vec: &'static [TokenKind]) {
+    fn err_unexpected_many(&mut self, vec: &'static [TokenKind]) -> ParseError {
         let Token { kind, span } = self.peek_token();
-        let err = ParseError::UnexpectedMany(*span, *kind, vec);
-        self.error.push(err);
+        ParseError::UnexpectedMany(*span, *kind, vec)
     }
 
-    fn match_token(&mut self, token: TokenKind) -> Option<()> {
+    fn match_token(&mut self, token: TokenKind) -> ParseResult<()> {
         if self.peek_kind() == token {
             self.next_token();
-            Some(())
+            Ok(())
         } else {
-            self.emit_unexpected(token);
-            None
+            Err(self.err_unexpected(token))
         }
     }
 
-    fn match_int(&mut self) -> Option<i64> {
+    /*
+    fn match_int(&mut self) -> ParseResult<i64> {
         if self.peek_kind() == TokenKind::LitInt {
             let slice = self.peek_slice();
             self.next_token();
-            Some(slice.parse().unwrap())
+            Ok(slice.parse().unwrap())
         } else {
-            self.emit_unexpected(TokenKind::LitInt);
-            None
+            Err(self.err_unexpected(TokenKind::LitInt))
         }
     }
+    */
 
-    fn match_literal(&mut self) -> Option<LitVal> {
+    fn match_lit_val(&mut self) -> ParseResult<LitVal> {
         match self.peek_kind() {
             TokenKind::LitInt => {
                 let slice = self.peek_slice();
                 self.next_token();
-                Some(LitVal::Int(slice.parse().unwrap()))
+                Ok(LitVal::Int(slice.parse().unwrap()))
             }
             TokenKind::LitReal => {
                 let slice = self.peek_slice();
                 self.next_token();
-                Some(LitVal::Real(slice.parse().unwrap()))
+                Ok(LitVal::Real(slice.parse().unwrap()))
             }
             TokenKind::LitBool => {
                 let slice = self.peek_slice();
                 self.next_token();
-                Some(LitVal::Bool(slice.parse().unwrap()))
+                Ok(LitVal::Bool(slice.parse().unwrap()))
             }
             TokenKind::LitChar => {
                 let slice = self.peek_slice();
                 self.next_token();
-                Some(LitVal::Bool(slice.parse().unwrap()))
+                Ok(LitVal::Bool(slice.parse().unwrap()))
             }
             _ => {
-                static VEC: [TokenKind; 4] = [
+                static VEC: &[TokenKind] = &[
                     TokenKind::LitInt, TokenKind::LitReal, TokenKind::LitBool, TokenKind::LitChar
                 ];
-                self.emit_unexpected_many(&VEC);
-                None
+                Err(self.err_unexpected_many(VEC))
             }
         }
     }
 
-    fn match_ident(&mut self) -> Option<InternStr> {
+    fn match_lit_type(&mut self) -> ParseResult<LitType> {
+        match self.peek_kind() {
+            TokenKind::TyInt => {
+                self.next_token();
+                Ok(LitType::Int)
+            }
+            TokenKind::TyReal => {
+                self.next_token();
+                Ok(LitType::Real)
+            }
+            TokenKind::TyBool => {
+                self.next_token();
+                Ok(LitType::Bool)
+            }
+            TokenKind::TyChar => {
+                self.next_token();
+                Ok(LitType::Char)
+            }
+            _ => {
+                static VEC: &[TokenKind] = &[
+                    TokenKind::TyInt, TokenKind::TyReal, TokenKind::TyBool, TokenKind::TyChar
+                ];
+                Err(self.err_unexpected_many(VEC))
+            }
+        }
+    }
+    
+
+    fn match_ident(&mut self) -> ParseResult<InternStr> {
         if self.peek_kind() == TokenKind::Ident {
             let slice = self.peek_slice();
             self.next_token();
-            Some(intern(slice))
+            Ok(intern(slice))
         } else {
-            self.emit_unexpected(TokenKind::Ident);
-            None
+            Err(self.err_unexpected(TokenKind::Ident))
         }
     }
 
-    fn match_builtin(&mut self) -> Option<Builtin> {
+    fn match_builtin(&mut self) -> ParseResult<Builtin> {
         if self.peek_kind() == TokenKind::Builtin {
             let slice = self.peek_slice();
             self.next_token();
@@ -164,62 +184,77 @@ impl<'src> Parser<'src> {
                 "@bnot" => Builtin::BNot,
                 _ => {
                     let span = *self.peek_span();
-                    self.error.push(ParseError::UnknownBuiltin(span, intern(slice)));
-                    return None;
+                    let err = ParseError::UnknownBuiltin(span, intern(slice));
+                    return Err(err);
                 }
             };
-            Some(res)
+            Ok(res)
         } else {
-            self.emit_unexpected(TokenKind::Builtin);
-            None
+            Err(self.err_unexpected(TokenKind::Builtin))
         }
     }
 
-    fn many<T>(&mut self, func: ParseFunc<T>) -> Option<Vec<T>> {      
+    fn option<T>(&mut self, func: ParseFunc<T>) -> ParseResult<Option<T>> {
+        let last = self.cursor;
+        match func(self) {
+            Ok(res) => {
+                Ok(Some(res))
+            }
+            Err(err) => {
+                // if it failed without consuming any token
+                if self.cursor == last {
+                    Ok(None) // return None
+                } else {
+                    Err(err) // otherwise fail
+                }
+            }
+        }
+    }
+
+    fn many<T>(&mut self, func: ParseFunc<T>) -> ParseResult<Vec<T>> {      
         let mut vec = Vec::new();
         let mut last = self.cursor;
         loop {
             match func(self) {
-                Some(res) => {
+                Ok(res) => {
                     vec.push(res);
                     last = self.cursor;
                 }
-                None => {
+                Err(err) => {
                     // if it failed without consuming any token
                     if self.cursor == last {
-                        // return the result
-                        return Some(vec);
+                        return Ok(vec); // return the result
                     } else {
-                        // rethrow the error
-                        return None;
+                        return Err(err); // rethrow the error
                     }
                 }
             }
         }
     }
 
-    fn many1<T>(&mut self, func: ParseFunc<T>) -> Option<Vec<T>> {
+    fn many1<T>(&mut self, func: ParseFunc<T>) -> ParseResult<Vec<T>> {
         let first = func(self)?;
         let mut vec = self.many(func)?;
         vec.insert(0, first);
-        Some(vec)
+        Ok(vec)
     }
 
-    fn sepby<T>(&mut self, delim: TokenKind, func: ParseFunc<T>) -> Option<Vec<T>> {
+    fn sepby<T>(&mut self, delim: TokenKind, func: ParseFunc<T>) -> ParseResult<Vec<T>> {
         let last = self.cursor;
         match self.sepby1(delim, func) {
-            Some(res) => Some(res),
-            None => {
+            Ok(res) => Ok(res),
+            Err(err) => {
+                // if it failed without consuming any token
                 if self.cursor == last {
-                    Some(Vec::new())
+                    Ok(Vec::new()) // return the result
                 } else {
-                    None
+                    Err(err) // rethrow the error
                 }
             }
         }
     }
 
-    fn sepby1<T>(&mut self, delim: TokenKind, func: ParseFunc<T>) -> Option<Vec<T>> {
+    fn sepby1<T>(&mut self, delim: TokenKind, func: ParseFunc<T>) -> ParseResult<Vec<T>> {
         let mut vec = Vec::new();
         let first = func(self)?;
         vec.push(first);
@@ -228,61 +263,59 @@ impl<'src> Parser<'src> {
             let res = func(self)?;
             vec.push(res);
         }
-        Some(vec)
+        Ok(vec)
     }
 }
 
-pub fn parse_expr(p: &mut Parser) -> Option<Expr> {
-    let start = p.start_pos();
+pub fn parse_expr(p: &mut Parser) -> ParseResult<Expr> {
     let expr = parse_expr_no_app(p)?;
-    if p.peek_kind() != TokenKind::LParen {
-        return Some(expr);
-    }
-
-    p.match_token(TokenKind::LParen)?;
-    let args = p.sepby(TokenKind::Comma, parse_expr)?;
-    p.match_token(TokenKind::RParen)?;
-    
-    let end = p.end_pos();
-    let span = Span::new(start, end);
-
-    Some(Expr::App {
-        func: Box::new(expr),
-        args,
-        span,
-    })
+    let applys = p.many(|p| {
+        let start = p.start_pos();
+        p.match_token(TokenKind::LParen)?;
+        let args = p.sepby(TokenKind::Comma, parse_expr)?;
+        p.match_token(TokenKind::RParen)?;
+        let span = Span::new(start, p.end_pos());
+        Ok((args,span))
+    })?;
+    let res = applys.into_iter()
+        .fold(expr, |func,(args,span)| {
+            let span = Span::merge(func.span(),&span);
+            let func = Box::new(func);
+            Expr::App { func, args, span }
+        });
+    Ok(res)
 }
 
-fn parse_expr_no_app(p: &mut Parser) -> Option<Expr> {
+fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
     let start = p.start_pos();
     match p.peek_kind() {
-        TokenKind::Ident => {
-            let span = *p.peek_span();
-            let var = p.match_ident().unwrap();
-            Some(Expr::Var { var, span })
-        }
         TokenKind::LitInt | TokenKind::LitReal | TokenKind::LitBool | TokenKind::LitChar => {
-            let span = *p.peek_span();
-            let lit = p.match_literal().unwrap();
-            Some(Expr::Lit { lit, span })
+            let lit = p.match_lit_val().unwrap();
+            let span = Span::new(start,p.end_pos());
+            Ok(Expr::Lit { lit, span })
         }
-        TokenKind::LParen => {
-            p.match_token(TokenKind::LParen).unwrap();
-            let mut expr = parse_expr(p)?;
+        TokenKind::Ident => {
+            let var = p.match_ident().unwrap();
+            let span = Span::new(start,p.end_pos());
+            Ok(Expr::Var { var, span })
+        }
+        TokenKind::Builtin => {
+            let prim = p.match_builtin().unwrap();
+            p.match_token(TokenKind::LParen)?;
+            let args = p.sepby(TokenKind::Comma, parse_expr)?;
             p.match_token(TokenKind::RParen)?;
-            *expr.span_mut() = Span::new(start,p.end_pos());
-            Some(expr)
+            let span = Span::new(start,p.end_pos());
+            Ok(Expr::Prim { prim, args, span })
         }
         TokenKind::Fun => {
             p.match_token(TokenKind::Fun).unwrap();
             p.match_token(TokenKind::LParen)?;
             let pars = p.sepby(TokenKind::Comma, |p| p.match_ident())?;
             p.match_token(TokenKind::RParen)?;
-            p.match_token(TokenKind::LBrace)?;
+            p.match_token(TokenKind::EArrow)?;
             let body = Box::new(parse_expr(p)?);
-            p.match_token(TokenKind::RBrace)?;
             let span = Span::new(start,p.end_pos());
-            Some(Expr::Fun { pars, body, span })
+            Ok(Expr::Fun { pars, body, span })
         }
         TokenKind::Let => {
             p.match_token(TokenKind::Let).unwrap();
@@ -292,49 +325,250 @@ fn parse_expr_no_app(p: &mut Parser) -> Option<Expr> {
             p.match_token(TokenKind::Semi)?;
             let cont = Box::new(parse_expr(p)?);
             let span = Span::new(start,p.end_pos());
-            Some(Expr::Let { bind, expr, cont, span })
+            Ok(Expr::Let { bind, expr, cont, span })
         }
-        TokenKind::Builtin => {
-            let prim = p.match_builtin().unwrap();
-            p.match_token(TokenKind::LParen)?;
-            let args = p.sepby(TokenKind::Comma, parse_expr)?;
-            p.match_token(TokenKind::RParen)?;
+        TokenKind::Case => {
+            p.match_token(TokenKind::Case).unwrap();
+            let expr = Box::new(parse_expr(p)?);
+            p.match_token(TokenKind::Of)?;
+            let rules = p.many1(|p| {
+                p.match_token(TokenKind::Bar)?;
+                parse_rule(p)
+            })?;
+            p.match_token(TokenKind::End)?;
             let span = Span::new(start,p.end_pos());
-            Some(Expr::Prim { prim, args, span })
+            Ok(Expr::Case { expr, rules, span })
+        }
+        TokenKind::Begin => {
+            p.match_token(TokenKind::Begin).unwrap();
+            let decls = p.option(|p| {
+                let decls = p.many(parse_decl)?;
+                p.match_token(TokenKind::In)?;
+                Ok(decls)
+            })?.unwrap_or(Vec::new());
+            let cont = Box::new(parse_expr(p)?);
+            p.match_token(TokenKind::End)?;
+            let span = Span::new(start,p.end_pos());
+            Ok(Expr::Blk { decls, cont, span })
+        }
+        TokenKind::LParen => {
+            p.match_token(TokenKind::LParen).unwrap();
+            let mut expr = parse_expr(p)?;
+            p.match_token(TokenKind::RParen)?;
+            *expr.span_mut() = Span::new(start,p.end_pos());
+            Ok(expr)
+        }
+        TokenKind::LBrace => {
+            p.match_token(TokenKind::LBrace).unwrap();
+            let mut expr = parse_expr(p)?;
+            p.match_token(TokenKind::RBrace)?;
+            *expr.span_mut() = Span::new(start,p.end_pos());
+            Ok(expr)
         }
         _ => {
             static VEC: &[TokenKind] = &[
-                TokenKind::Ident, TokenKind::LitInt, TokenKind::LitReal, TokenKind::LitBool, TokenKind::LitChar,
-                TokenKind::LParen, TokenKind::Fun, TokenKind::Let, TokenKind::Builtin,
+                TokenKind::LitInt, TokenKind::LitReal, TokenKind::LitBool, TokenKind::LitChar,
+                TokenKind::Ident, TokenKind::Builtin, TokenKind::Fun, TokenKind::Let,
+                TokenKind::Case, TokenKind::Begin, TokenKind::LParen,
             ];
-            p.emit_unexpected_many(VEC);
-            None
+            Err(p.err_unexpected_many(VEC))
         }
     }
 }
 
-pub fn parse_decl(p: &mut Parser) -> Option<Decl> {
+fn parse_pattern(p: &mut Parser) -> ParseResult<Pattern> {
+    let start = p.start_pos();
     match p.peek_kind() {
+        TokenKind::LitInt | TokenKind::LitReal | TokenKind::LitBool | TokenKind::LitChar => {
+            let lit = p.match_lit_val().unwrap();
+            let span = Span::new(start,p.end_pos());
+            Ok(Pattern::Lit{ lit, span })
+        }
+        TokenKind::Ident => {
+            let var = p.match_ident().unwrap();
+            if p.peek_kind() == TokenKind::LParen {
+                p.match_token(TokenKind::LParen).unwrap();
+                let pars = p.sepby(TokenKind::Comma, parse_pattern)?;
+                p.match_token(TokenKind::RParen)?;
+                let span = Span::new(start,p.end_pos());
+                Ok(Pattern::Cons { cons: var, pars, span })
+            } else {
+                let span = Span::new(start,p.end_pos());
+                Ok(Pattern::Var { var, span })
+            }
+        }
+        TokenKind::Wild => {
+            let span = *p.peek_span();
+            Ok(Pattern::Wild { span })
+        }
         _ => {
-            todo!()
+            static VEC: &[TokenKind] = &[
+                TokenKind::LitInt, /*TokenKind::LitReal,*/ TokenKind::LitBool, TokenKind::LitChar,
+                TokenKind::Ident, TokenKind::Wild,
+            ];
+            Err(p.err_unexpected_many(VEC))
+        }
+    }
+}
+
+fn parse_rule(p: &mut Parser) -> ParseResult<Rule> {
+    let start = p.start_pos();
+    let patn = parse_pattern(p)?;
+    p.match_token(TokenKind::EArrow)?;
+    p.match_token(TokenKind::LBrace)?;
+    let body = parse_expr(p)?;
+    p.match_token(TokenKind::RBrace)?;
+    let span = Span::new(start,p.end_pos());
+    Ok(Rule { patn, body, span })
+}
+
+pub fn parse_decl(p: &mut Parser) -> ParseResult<Decl> {
+    let start = p.start_pos();
+    match p.peek_kind() {
+        TokenKind::Fun => {
+            p.match_token(TokenKind::Fun).unwrap();
+            let name = p.match_ident()?;
+            p.match_token(TokenKind::LParen)?;
+            let pars = p.sepby(TokenKind::Comma, |p| p.match_ident())?;
+            p.match_token(TokenKind::RParen)?;
+            p.match_token(TokenKind::EArrow)?;
+            let body = Box::new(parse_expr(p)?);
+            let span = Span::new(start,p.end_pos());
+            Ok(Decl::Func { name, pars, body, span })
+        }
+        TokenKind::Data => {
+            p.match_token(TokenKind::Data).unwrap();
+            let name = p.match_ident()?;
+            let pars = p.option(|p| {
+                p.match_token(TokenKind::LBracket)?;
+                let pars = p.sepby1(TokenKind::Comma, |p| p.match_ident())?;
+                p.match_token(TokenKind::RBracket)?;
+                Ok(pars)
+            })?.unwrap_or(Vec::new());
+            p.match_token(TokenKind::Equal)?;
+            let vars = p.many1(|p| {
+                p.match_token(TokenKind::Bar)?;
+                parse_varient(p)
+            })?;
+            p.match_token(TokenKind::End)?;
+            let span = Span::new(start,p.end_pos());
+            Ok(Decl::Data { name, pars, vars, span })
+        }
+        TokenKind::Type => {
+            p.match_token(TokenKind::Type).unwrap();
+            let name = p.match_ident()?;
+            let pars = p.option(|p| {
+                p.match_token(TokenKind::LBracket)?;
+                let pars = p.sepby1(TokenKind::Comma, |p| p.match_ident())?;
+                p.match_token(TokenKind::RBracket)?;
+                Ok(pars)
+            })?.unwrap_or(Vec::new());
+            p.match_token(TokenKind::Equal)?;
+            let typ = parse_type(p)?;
+            p.match_token(TokenKind::Semi)?;
+            let span = Span::new(start,p.end_pos());
+            Ok(Decl::Type { name, pars, typ, span })
+        }
+        _ => {
+            static VEC: &[TokenKind] = &[
+                TokenKind::Fun, TokenKind::Data, TokenKind::Type,
+            ];
+            Err(p.err_unexpected_many(VEC))
+        }
+    }
+}
+
+pub fn parse_varient(p: &mut Parser) -> ParseResult<Varient> {
+    let start = p.start_pos();
+    let cons = p.match_ident()?;
+    let pars = p.option(|p| {
+        p.match_token(TokenKind::LParen)?;
+        let pars = p.sepby1(TokenKind::Semi, parse_type)?;
+        p.match_token(TokenKind::RParen)?;
+        Ok(pars)
+    })?.unwrap_or(Vec::new());
+    let span = Span::new(start,p.end_pos());
+    Ok(Varient { cons, pars, span })
+}
+
+fn parse_type(p: &mut Parser) -> ParseResult<MonoType> {
+    let typ = parse_type_no_app(p)?;
+    let applys = p.many(|p| {
+        let start = p.start_pos();
+        p.match_token(TokenKind::LBracket)?;
+        let args = p.sepby(TokenKind::Comma, parse_type)?;
+        p.match_token(TokenKind::RBracket)?;
+        let span = Span::new(start, p.end_pos());
+        Ok((args,span))
+    })?;
+    let res = applys.into_iter()
+        .fold(typ, |func,(args,_span)| {
+            // let span = Span::merge(typ.span(), &_span);
+            let func = Box::new(func);
+            MonoType::App(func, args)
+        });
+    Ok(res)
+}
+
+pub fn parse_type_no_app(p: &mut Parser) -> ParseResult<MonoType> {
+    //let start = p.start_pos();
+    match p.peek_kind() {
+        TokenKind::TyInt | TokenKind::TyReal | TokenKind::TyBool | TokenKind::TyChar => {
+            let lit = p.match_lit_type().unwrap();
+            Ok(MonoType::Lit(lit))
+        }
+        TokenKind::Ident => {
+            let var = p.match_ident().unwrap();
+            Ok(MonoType::Var(var))
+        }
+        TokenKind::Fun => {
+            p.match_token(TokenKind::Fun).unwrap();
+            p.match_token(TokenKind::LParen)?;
+            let pars = p.sepby(TokenKind::Comma, parse_type_no_app)?;
+            p.match_token(TokenKind::RParen)?;
+            p.match_token(TokenKind::Arrow)?;
+            let body = Box::new(parse_type_no_app(p)?);
+            Ok(MonoType::Fun(pars,body))
+        }
+        _ => {
+            static VEC: &[TokenKind] = &[
+                TokenKind::LitInt, /*TokenKind::LitReal,*/ TokenKind::LitBool, TokenKind::LitChar,
+                TokenKind::Ident, TokenKind::Wild,
+            ];
+            Err(p.err_unexpected_many(VEC))
         }
     }
 }
 
 #[test]
 fn parser_test() {
-    let string = "
-        fn (x,y) { @iadd(x,y) }(1,2)
-    ";
+    let string = r#"
+begin
+    type My-Int = Int;
+    type Option-Int = Option[Int];
+    data Option[T] =
+    | Some(T)
+    | None
+    end
+    fun add1(x) => @iadd(x, 1)
+    fun add2(x) =>
+        let y = @iadd(x,1);
+        @iadd(y,1)
+    fun const-3(x) => {
+        let y = @iadd(x,1);
+        @iadd(y,1)
+    }
+    fun option-add1(x) =>
+        case x of
+        | Some(y) => { Some(@iadd(x,1)) }
+        | None => { None }
+        end
+in
+    @isub(addone(42), 1)
+end
+"#;
 
     let mut par = Parser::new(string);
     let res = parse_expr(&mut par);
-    match res {
-        Some(res) => {
-            println!("{}", res);
-        }
-        None => {
-            println!("{:#?}", par.error);
-        }
-    }
+    assert!(res.is_ok());
 }
