@@ -52,59 +52,127 @@ pub enum Expr<Ident = InternStr> {
         lit : LitVal,
         span: Span,
     },
-    Opr {
-        op: Builtin,
-        args: Vec<Expr>,
-        span: Span,
-    },
     Var {
         var: Ident,
         span: Span,
     },
+    Prim {
+        prim: Builtin,
+        args: Vec<Expr<Ident>>,
+        span: Span,
+    },
     Fun {
         pars: Vec<Ident>,
-        body: Box<Expr>,
+        body: Box<Expr<Ident>>,
         span: Span,
     },
     App {
-        func: Box<Expr>,
-        args: Vec<Expr>,
+        func: Box<Expr<Ident>>,
+        args: Vec<Expr<Ident>>,
         span: Span,
     },
     Let {
         bind: Ident,
-        expr: Box<Expr>,
-        cont: Box<Expr>,
+        expr: Box<Expr<Ident>>,
+        cont: Box<Expr<Ident>>,
+        span: Span,
+    },
+    Case {
+        expr: Box<Expr<Ident>>,
+        rules: Vec<Rule<Ident>>,
         span: Span,
     },
     Blk {
         decls: Vec<Decl<Ident>>,
-        cont: Box<Expr>,
+        cont: Box<Expr<Ident>>,
         span: Span,
     },
 }
 
-impl Spanned for Expr {
+impl<Ident> Spanned for Expr<Ident> {
     fn span(&self) -> &Span {
         match self {
             Expr::Lit { span, .. } => span,
-            Expr::Opr { span, .. } => span,
             Expr::Var { span, .. } => span,
+            Expr::Prim { span, .. } => span,
             Expr::Fun { span, .. } => span,
             Expr::App { span, .. } => span,
             Expr::Let { span, .. } => span,
+            Expr::Case { span, .. } => span,
             Expr::Blk { span, .. } => span,
         }
     }
     fn span_mut(&mut self) -> &mut Span {
         match self {
             Expr::Lit { span, .. } => span,
-            Expr::Opr { span, .. } => span,
             Expr::Var { span, .. } => span,
+            Expr::Prim { span, .. } => span,
             Expr::Fun { span, .. } => span,
             Expr::App { span, .. } => span,
             Expr::Let { span, .. } => span,
+            Expr::Case { span, .. } => span,
             Expr::Blk { span, .. } => span,
+        }
+    }
+}
+
+impl Expr {
+    pub fn is_simple(&self) -> bool {
+        match self {
+            Expr::Lit { .. } => true,
+            Expr::Var { .. } => true,
+            Expr::Prim { .. } => true,
+            Expr::Fun { .. } => true,
+            Expr::App { .. } => true,
+            Expr::Let { .. } => false,
+            Expr::Case { .. } => false,
+            Expr::Blk { .. } => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rule<Ident = InternStr> {
+    pub patn : Pattern<Ident>,
+    pub body: Expr<Ident>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Pattern<Ident = InternStr> {
+    Var {
+        var: Ident,
+        span: Span,
+    },
+    Lit {
+        lit: LitVal,
+        span: Span,
+    },
+    Cons {
+        cons: Ident,
+        pars: Vec<Pattern<Ident>>,
+        span: Span,
+    },
+    Wild {
+        span: Span,
+    },
+}
+
+impl<Ident> Spanned for Pattern<Ident> {
+    fn span(&self) -> &Span {
+        match self {
+            Pattern::Var { span, .. } => span,
+            Pattern::Lit { span, .. } => span,
+            Pattern::Cons { span, .. } => span,
+            Pattern::Wild { span } => span,
+        }
+    }
+    fn span_mut(&mut self) -> &mut Span {
+        match self {
+            Pattern::Var { span, .. } => span,
+            Pattern::Lit { span, .. } => span,
+            Pattern::Cons { span, .. } => span,
+            Pattern::Wild { span } => span,
         }
     }
 }
@@ -112,22 +180,46 @@ impl Spanned for Expr {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Decl<Ident = InternStr> {
     Func {
-        func: Ident,
+        name: Ident,
         pars: Vec<Ident>,
-        expr: Box<Expr<Ident>>,
+        body: Box<Expr<Ident>>,
         span: Span,
     },
+    Data {
+        name: Ident,
+        pars: Vec<Ident>,
+        vars: Vec<Varient<Ident>>,
+        span: Span,
+    },
+    Type {
+        name: Ident,
+        pars: Vec<Ident>,
+        typ: MonoType<Ident>,
+        span: Span,
+    }
 }
 
-impl Spanned for Decl {
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Varient<Ident = InternStr> {
+    pub cons: Ident,
+    pub pars: Vec<MonoType<Ident>>,
+    pub span: Span,
+}
+
+impl<Ident> Spanned for Decl<Ident> {
     fn span(&self) -> &Span {
         match self {
             Decl::Func { span, .. } => span,
+            Decl::Data { span, .. } => span,
+            Decl::Type { span, .. } => span,
         }
     }
     fn span_mut(&mut self) -> &mut Span {
         match self {
             Decl::Func { span, .. } => span,
+            Decl::Data { span, .. } => span,
+            Decl::Type { span, .. } => span,
         }
     }
 }
@@ -144,12 +236,12 @@ pub enum LitType {
 pub enum MonoType<Ident = InternStr> {
     Lit(LitType),
     Var(Ident),
-    Arr(Vec<MonoType>, Box<MonoType>),
-    App(Box<MonoType>, Vec<MonoType>),
+    Fun(Vec<MonoType<Ident>>, Box<MonoType<Ident>>),
+    App(Box<MonoType<Ident>>, Vec<MonoType<Ident>>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PolyType<Ident = InternStr> {
-    para: Vec<Ident>,
+    pars: Vec<Ident>,
     body: MonoType,
 }

@@ -295,12 +295,12 @@ fn parse_expr_no_app(p: &mut Parser) -> Option<Expr> {
             Some(Expr::Let { bind, expr, cont, span })
         }
         TokenKind::Builtin => {
-            let op = p.match_builtin().unwrap();
+            let prim = p.match_builtin().unwrap();
             p.match_token(TokenKind::LParen)?;
             let args = p.sepby(TokenKind::Comma, parse_expr)?;
             p.match_token(TokenKind::RParen)?;
             let span = Span::new(start,p.end_pos());
-            Some(Expr::Opr { op, args, span })
+            Some(Expr::Prim { prim, args, span })
         }
         _ => {
             static VEC: &[TokenKind] = &[

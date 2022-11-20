@@ -89,8 +89,8 @@ impl Display for Expr {
             Expr::Lit { lit, .. } => {
                 write!(f, "{lit}")
             }
-            Expr::Opr { op, args, .. } => {
-                write!(f, "@{op}(")?;
+            Expr::Prim { prim, args, .. } => {
+                write!(f, "@{prim}(")?;
                 if !args.is_empty() {
                     write!(f, "{}", args[0])?;
                     for arg in &args[1..] {
@@ -139,6 +139,9 @@ impl Display for Expr {
                     end
                 ")
             }
+            Expr::Case { .. } => {
+                todo!()
+            }
         }
     }
 }
@@ -146,8 +149,8 @@ impl Display for Expr {
 impl Display for Decl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Decl::Func { func, pars, expr, .. } => {
-                write!(f, "fun {func}(")?;
+            Decl::Func { name, pars, body, .. } => {
+                write!(f, "fun {name}(")?;
                 if !pars.is_empty() {
                     write!(f, "{}", pars[0])?;
                     for par in &pars[1..] {
@@ -155,9 +158,11 @@ impl Display for Decl {
                     }
                 }
                 write!(f, "){INDT}{NWLN}\
-                    {expr};
+                    {body};
                 ")
             }
+            Decl::Data { .. } => todo!(),
+            Decl::Type { .. } => todo!(),
         }
     }
 }
