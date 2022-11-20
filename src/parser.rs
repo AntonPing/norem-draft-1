@@ -273,8 +273,8 @@ fn parse_expr_no_app(p: &mut Parser) -> Option<Expr> {
             *expr.span_mut() = Span::new(start,p.end_pos());
             Some(expr)
         }
-        TokenKind::Fn => {
-            p.match_token(TokenKind::Fn).unwrap();
+        TokenKind::Fun => {
+            p.match_token(TokenKind::Fun).unwrap();
             p.match_token(TokenKind::LParen)?;
             let pars = p.sepby(TokenKind::Comma, |p| p.match_ident())?;
             p.match_token(TokenKind::RParen)?;
@@ -305,7 +305,7 @@ fn parse_expr_no_app(p: &mut Parser) -> Option<Expr> {
         _ => {
             static VEC: &[TokenKind] = &[
                 TokenKind::Ident, TokenKind::LitInt, TokenKind::LitReal, TokenKind::LitBool, TokenKind::LitChar,
-                TokenKind::LParen, TokenKind::Fn, TokenKind::Let, TokenKind::Builtin,
+                TokenKind::LParen, TokenKind::Fun, TokenKind::Let, TokenKind::Builtin,
             ];
             p.emit_unexpected_many(VEC);
             None

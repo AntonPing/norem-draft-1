@@ -32,24 +32,46 @@ pub enum TokenKind {
     Arrow,
     /// "=>"
     EArrow,
-    /// "fn"
-    Fn,
+    /// "fun"
+    Fun,
     /// "let"
     Let,
-    /// "letrec"
-    Letrec,
+    /// "begin"
+    Begin,
     /// "in"
     In,
     /// "end"
     End,
-    /// literal type `Int`
+    /// "case"
+    Case,
+    /// "of"
+    Of,
+    /// "data"
+    Data,
+    /// "type"
+    Type,
+    /// "if"
+    If,
+    /// "then"
+    Then,
+    /// "else"
+    Else,
+    /// literal value `Int`
     LitInt,
-    /// literal type `Real`
+    /// literal value `Real`
     LitReal,
-    /// literal type `Bool`
+    /// literal value `Bool`
     LitBool,
-    /// literal type `Char`
+    /// literal value `Char`
     LitChar,
+    /// literal type `Int`
+    TyInt,
+    /// literal type `Real`
+    TyReal,
+    /// literal type `Bool`
+    TyBool,
+    /// literal type `Char`
+    TyChar,
     /// builtin primitives
     Builtin,
     /// identifier
@@ -72,6 +94,17 @@ pub enum TokenKind {
     BlockComment,
     // end of file
     EndOfFile,
+}
+
+impl TokenKind {
+    pub fn is_bad_token(&self) -> bool {
+        match self {
+              TokenKind::FailedToken | TokenKind::FailedBlockComment
+            | TokenKind::LineComment | TokenKind::BlockComment
+            | TokenKind::EndOfFile => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -97,14 +130,35 @@ impl Spanned for Token {
 
 pub fn as_keyword(str: &str) -> Option<TokenKind> {
     let tok = match str {
-        "fn" => TokenKind::Fn,
+        "fun" => TokenKind::Fun,
         "let" => TokenKind::Let,
-        "letrec" => TokenKind::Letrec,
+        "begin" => TokenKind::Begin,
         "in" => TokenKind::In,
         "end" => TokenKind::End,
+        "case" => TokenKind::Case,
+        "of" => TokenKind::Of,
+        "if" => TokenKind::If,
+        "then" => TokenKind::Then,
+        "else" => TokenKind::Else,
+        "data" => TokenKind::Data,
+        "type" => TokenKind::Type,
+        "true" => TokenKind::LitBool,
+        "false" => TokenKind::LitBool,
+        "Int" => TokenKind::TyInt,
+        "Real" => TokenKind::TyReal,
+        "Bool" => TokenKind::TyBool,
+        "Char" => TokenKind::TyChar,
         _ => { return None; }
     };
     Some(tok)
+}
+
+pub fn is_ident_first(ch: char) -> bool {
+    ch.is_ascii_alphabetic()
+}
+
+pub fn is_ident_body(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'
 }
 
 pub fn is_opr_char(ch: char) -> bool {
@@ -258,7 +312,7 @@ impl<'src> Lexer<'src> {
             Some('@') => { self.builtin() }
             Some('_') => { self.wildcard()}
             Some(ch) if is_opr_char(ch) => { self.operator() }
-            Some(ch) if ch.is_ascii_alphabetic() => { self.ident_or_keyword() }
+            Some(ch) if is_ident_first(ch) => { self.ident_or_keyword() }
             Some(ch) if ch.is_ascii_digit() => { self.int_or_real() }
             Some(_) => { self.failed_token() }
             None => { TokenKind::EndOfFile }
@@ -310,8 +364,8 @@ impl<'src> Lexer<'src> {
     fn ident_or_keyword(&mut self) -> TokenKind {
         let start = self.get_abs();
         let ch1 = self.next_char();
-        assert!(ch1.unwrap().is_alphabetic());
-        self.skip_while(|ch| ch.is_alphanumeric());
+        assert!(is_ident_first(ch1.unwrap()));
+        self.skip_while(|ch| is_ident_body(ch));
         let end = self.get_abs();
         let slice = self.get_slice(start, end);
         if let Some(kwd) = as_keyword(slice) {
@@ -375,20 +429,34 @@ impl<'src> Iterator for Lexer<'src> {
 
 #[test]
 fn lexer_test() {
-    let string = "
-        let
-            val x: Int = 42
-            // some nonsense
-            type MyInt = Int /*
-                /* nonsense in nonsense */
-            */
-            data Color = Red | Blue | Green
-        in
-            x
+    let string = 
+r#"
+begin
+    type My-Int = Int;
+    type Option-Int = Option[Int];
+    data Option[T] =
+    | Some(T)
+    | None
+    end
+    fun add1(x) => @iadd(x, 1)
+    fun add2(x) =>
+        let y = @iadd(x,1);
+        @iadd(y,1)
+    fun const-3(x) => {
+        let y = @iadd(x,1);
+        @iadd(y,1)
+    }
+    fun option-add1(x) =>
+        case x of
+        | Some(y) => { Some(@iadd(x,1)) }
+        | None => { None }
         end
-    ";
+in
+    @isub(addone(42), 1)
+end
+"#;
     let lex = Lexer::new(string);
     lex.into_iter().for_each(|tok| {
-        println!("{:?}", tok);
+        assert!(!tok.kind.is_bad_token());
     });
 }
