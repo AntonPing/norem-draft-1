@@ -1,4 +1,5 @@
 use std::fmt::{self, Debug, Display};
+use itertools::{self,Itertools};
 use crate::ast::*;
 
 pub struct INDT;
@@ -30,19 +31,19 @@ impl Display for NWLN {
 
 impl Debug for INDT {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{:?}", self)
+        writeln!(f, "{}", self)
     }
 }
 
 impl Debug for DEDT {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{:?}", self)
+        writeln!(f, "{}", self)
     }
 }
 
 impl Debug for NWLN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{:?}", self)
+        writeln!(f, "{}", self)
     }
 }
 
@@ -89,59 +90,104 @@ impl Display for Expr {
             Expr::Lit { lit, .. } => {
                 write!(f, "{lit}")
             }
-            Expr::Prim { prim, args, .. } => {
-                write!(f, "@{prim}(")?;
-                if !args.is_empty() {
-                    write!(f, "{}", args[0])?;
-                    for arg in &args[1..] {
-                        write!(f, ",{arg}")?;
-                    }
-                }
-                write!(f, ")")
-            }
             Expr::Var { var, .. } => {
                 write!(f, "{var}")
             }
+            Expr::Prim { prim, args, .. } => {
+                let args = args.iter().format(&", ");
+                write!(f, "@{prim}({args})")
+            }
             Expr::Fun { pars, body, .. } => {
-                write!(f, "fn (")?;
-                if !pars.is_empty() {
-                    write!(f, "{}", pars[0])?;
-                    for par in &pars[1..] {
-                        write!(f, ",{par}")?;
-                    }
-                }
-                write!(f, ") {{ {body} }}")
+                let pars = pars.iter().format(&", ");
+                write!(f, "fn ({pars}) {{{INDT}{NWLN}\
+                    {body}{DEDT}{NWLN}\
+                }}")
             }
             Expr::App { func, args, ..} => {
-                write!(f, "{func}(")?;
-                if !args.is_empty() {
-                    write!(f, "{}", args[0])?;
-                    for arg in &args[1..] {
-                        write!(f, ",{arg}")?;
-                    }
-                }
-                write!(f, ")")
+                let args = args.iter().format(&", ");
+                write!(f, "{func}({args})")
             }
             Expr::Let { bind, expr, cont, .. } => {
-                write!(f, "\
-                    let {bind} = {expr};{NWLN}\
-                    {cont}
-                ")
+                write!(f, "let {bind} = {expr};{NWLN}\
+                    {cont}")
             }
             Expr::Blk { decls, cont, .. } => {
-                write!(f, "block{INDT}")?;
-                for decl in decls {
-                    write!(f, "{NWLN}{decl}")?;
+                if decls.is_empty() {
+                    write!(f, "\
+                        begin{INDT}{NWLN}\
+                            {cont}{DEDT}{NWLN}\
+                        end\
+                    ")
+                } else {
+                    write!(f, "begin{INDT}")?;
+                    for decl in decls {
+                        write!(f, "{NWLN}{decl}")?;
+                    }
+                    write!(f, "{DEDT}{NWLN}\
+                        in{INDT}{NWLN}\
+                            {cont}{DEDT}{NWLN}\
+                        end
+                    ")
                 }
-                write!(f, "{DEDT}{NWLN}\
-                    in {INDT}{NWLN}\
-                        {cont} {DEDT}{NWLN}\
-                    end
-                ")
             }
-            Expr::Case { .. } => {
-                todo!()
+            Expr::Case { expr, rules, .. } => {
+                // Void can't be defined by user
+                assert!(!rules.is_empty());
+                write!(f, "case {expr} of")?;
+                for rule in rules {
+                    write!(f, "{NWLN}| {rule}")?;
+                }
+                write!(f, "{NWLN}end")
             }
+        }
+    }
+}
+
+impl Display for Pattern {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Pattern::Var{ var, .. } => {
+                write!(f,"{var}")
+            }
+            Pattern::Lit{ lit, .. } => {
+                write!(f,"{lit}")
+            }
+            Pattern::Cons{ cons, pars, .. } => {
+                if pars.is_empty() {
+                    write!(f,"{cons}")
+                } else {
+                    let pars = pars.iter().format(&", ");
+                    write!(f, "{cons}({pars})")
+                }
+            }
+            Pattern::Wild{ .. } => {
+                write!(f,"_")
+            }
+        }
+    }
+}
+
+impl Display for Rule {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let Rule { patn, body, .. } = self;
+        if body.is_simple() {
+            write!(f,"{patn} => {body}")
+        } else {
+            write!(f,"{patn} => {INDT}{NWLN}\
+                {body}{DEDT}{NWLN}\
+            ")
+        }
+    }
+}
+
+impl Display for Varient {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let Varient { cons, pars, .. } = self;
+        if pars.is_empty() {
+            write!(f,"{cons}")
+        } else {
+            let pars = pars.iter().format(&", ");
+            write!(f,"{cons}[{pars}]")
         }
     }
 }
@@ -150,23 +196,62 @@ impl Display for Decl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Decl::Func { name, pars, body, .. } => {
-                write!(f, "fun {name}(")?;
-                if !pars.is_empty() {
-                    write!(f, "{}", pars[0])?;
-                    for par in &pars[1..] {
-                        write!(f, ",{par}")?;
-                    }
+                let pars = pars.iter().format(&", ");
+                if body.is_simple() {
+                    write!(f, "fun {name}({pars}) = {body};")
+                } else {
+                    write!(f, "fun {name}({pars}) = {INDT}{NWLN}\
+                        {body}{DEDT}\
+                    ")
                 }
-                write!(f, "){INDT}{NWLN}\
-                    {body};
-                ")
             }
-            Decl::Data { .. } => todo!(),
-            Decl::Type { .. } => todo!(),
+            Decl::Data { name, pars, vars, .. } => {
+                if pars.is_empty() {
+                    write!(f, "data {name} =")?;
+                } else {
+                    let pars = pars.iter().format(&", ");
+                    write!(f, "data {name}[{pars}] =")?;
+                }
+                // Void can't be defined by user
+                assert!(!vars.is_empty());
+                for var in vars {
+                    write!(f,"{NWLN}| {var}")?;
+                }
+                write!(f, "{NWLN}end")
+            }
+            Decl::Type { name, pars, typ, .. } => {
+                if pars.is_empty() {
+                    write!(f, "type {name} = {typ};")
+                } else {
+                    let pars = pars.iter().format(&", ");
+                    write!(f, "type {name}[{pars}] = {typ};")
+                }
+            }
         }
     }
 }
 
+impl Display for MonoType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            MonoType::Lit(lit) => {
+                write!(f, "{lit}")
+            }
+            MonoType::Var(var) => {
+                write!(f, "{var}")
+            }
+            MonoType::Fun(args, res) => {
+                let args = args.iter().format(&", ");
+                write!(f, "fn ({args}) -> {res}")
+            }
+            MonoType::App(cons, args) => {
+                assert!(!args.is_empty());
+                let args = args.iter().format(&", ");
+                write!(f, "{cons}[{args}]")
+            }
+        }
+    }
+}
 
 #[test]
 pub fn printer_ident_test() {
