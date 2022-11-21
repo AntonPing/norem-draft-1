@@ -1,6 +1,6 @@
-use std::fmt::{self, Debug, Display};
-use itertools::{self,Itertools};
 use crate::ast::*;
+use itertools::{self, Itertools};
+use std::fmt::{self, Debug, Display};
 
 pub struct INDT;
 pub struct DEDT;
@@ -10,14 +10,18 @@ static mut INDT_LEVEL: usize = 0;
 
 impl Display for INDT {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        unsafe { INDT_LEVEL += 1; }
+        unsafe {
+            INDT_LEVEL += 1;
+        }
         Ok(())
     }
 }
 
 impl Display for DEDT {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        unsafe { INDT_LEVEL -= 1; }
+        unsafe {
+            INDT_LEVEL -= 1;
+        }
         Ok(())
     }
 }
@@ -99,35 +103,26 @@ impl Display for Expr {
             }
             Expr::Fun { pars, body, .. } => {
                 let pars = pars.iter().format(&", ");
-                write!(f, "fn ({pars}) {{{INDT}{NWLN}\
-                    {body}{DEDT}{NWLN}\
-                }}")
+                write!(f, "fn ({pars}) {{{INDT}{NWLN}{body}{DEDT}{NWLN}}}")
             }
-            Expr::App { func, args, ..} => {
+            Expr::App { func, args, .. } => {
                 let args = args.iter().format(&", ");
                 write!(f, "{func}({args})")
             }
-            Expr::Let { bind, expr, cont, .. } => {
-                write!(f, "let {bind} = {expr};{NWLN}\
-                    {cont}")
+            Expr::Let {
+                bind, expr, cont, ..
+            } => {
+                write!(f, "let {bind} = {expr};{NWLN}{cont}")
             }
             Expr::Blk { decls, cont, .. } => {
                 if decls.is_empty() {
-                    write!(f, "\
-                        begin{INDT}{NWLN}\
-                            {cont}{DEDT}{NWLN}\
-                        end\
-                    ")
+                    write!(f, "begin{INDT}{NWLN}{cont}{DEDT}{NWLN}end")
                 } else {
                     write!(f, "begin{INDT}")?;
                     for decl in decls {
                         write!(f, "{NWLN}{decl}")?;
                     }
-                    write!(f, "{DEDT}{NWLN}\
-                        in{INDT}{NWLN}\
-                            {cont}{DEDT}{NWLN}\
-                        end
-                    ")
+                    write!(f, "{DEDT}{NWLN}in{INDT}{NWLN}{cont}{DEDT}{NWLN}end")
                 }
             }
             Expr::Case { expr, rules, .. } => {
@@ -146,22 +141,22 @@ impl Display for Expr {
 impl Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Pattern::Var{ var, .. } => {
-                write!(f,"{var}")
+            Pattern::Var { var, .. } => {
+                write!(f, "{var}")
             }
-            Pattern::Lit{ lit, .. } => {
-                write!(f,"{lit}")
+            Pattern::Lit { lit, .. } => {
+                write!(f, "{lit}")
             }
-            Pattern::Cons{ cons, pars, .. } => {
+            Pattern::Cons { cons, pars, .. } => {
                 if pars.is_empty() {
-                    write!(f,"{cons}")
+                    write!(f, "{cons}")
                 } else {
                     let pars = pars.iter().format(&", ");
                     write!(f, "{cons}({pars})")
                 }
             }
-            Pattern::Wild{ .. } => {
-                write!(f,"_")
+            Pattern::Wild { .. } => {
+                write!(f, "_")
             }
         }
     }
@@ -171,11 +166,9 @@ impl Display for Rule {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Rule { patn, body, .. } = self;
         if body.is_simple() {
-            write!(f,"{patn} => {body}")
+            write!(f, "{patn} => {body}")
         } else {
-            write!(f,"{patn} => {INDT}{NWLN}\
-                {body}{DEDT}{NWLN}\
-            ")
+            write!(f, "{patn} => {INDT}{NWLN}{body}{DEDT}{NWLN}")
         }
     }
 }
@@ -184,10 +177,10 @@ impl Display for Varient {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Varient { cons, pars, .. } = self;
         if pars.is_empty() {
-            write!(f,"{cons}")
+            write!(f, "{cons}")
         } else {
             let pars = pars.iter().format(&", ");
-            write!(f,"{cons}[{pars}]")
+            write!(f, "{cons}[{pars}]")
         }
     }
 }
@@ -195,17 +188,19 @@ impl Display for Varient {
 impl Display for Decl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Decl::Func { name, pars, body, .. } => {
+            Decl::Func {
+                name, pars, body, ..
+            } => {
                 let pars = pars.iter().format(&", ");
                 if body.is_simple() {
                     write!(f, "fun {name}({pars}) = {body};")
                 } else {
-                    write!(f, "fun {name}({pars}) = {INDT}{NWLN}\
-                        {body}{DEDT}\
-                    ")
+                    write!(f, "fun {name}({pars}) ={INDT}{NWLN}{body}{DEDT}")
                 }
             }
-            Decl::Data { name, pars, vars, .. } => {
+            Decl::Data {
+                name, pars, vars, ..
+            } => {
                 if pars.is_empty() {
                     write!(f, "data {name} =")?;
                 } else {
@@ -215,11 +210,13 @@ impl Display for Decl {
                 // Void can't be defined by user
                 assert!(!vars.is_empty());
                 for var in vars {
-                    write!(f,"{NWLN}| {var}")?;
+                    write!(f, "{NWLN}| {var}")?;
                 }
                 write!(f, "{NWLN}end")
             }
-            Decl::Type { name, pars, typ, .. } => {
+            Decl::Type {
+                name, pars, typ, ..
+            } => {
                 if pars.is_empty() {
                     write!(f, "type {name} = {typ};")
                 } else {
@@ -255,24 +252,27 @@ impl Display for MonoType {
 
 #[test]
 pub fn printer_ident_test() {
-    let string1 = format!("\
+    let string1 = format!(
+        "\n\
         hello{INDT}{NWLN}\
         world{INDT}{NWLN}\
         hello{INDT}{NWLN}\
         world{DEDT}{NWLN}\
         hello{DEDT}{NWLN}\
         world{DEDT}{NWLN}\
-        hello world!\
-    ");
+        hello world!\n\
+    "
+    );
 
-    let string2 = 
-r#"hello
+    let string2 = r#"
+hello
   world
     hello
       world
     hello
   world
-hello world!"#;
+hello world!
+"#;
 
-    assert_eq!(string1,string2)
+    assert_eq!(string1, string2)
 }

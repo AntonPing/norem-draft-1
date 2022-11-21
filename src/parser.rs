@@ -1,7 +1,7 @@
 use crate::ast::*;
-use crate::position::{Span, Position, Spanned};
-use crate::intern::{InternStr, intern};
-use crate::lexer::{Token, Lexer, TokenKind};
+use crate::intern::{intern, InternStr};
+use crate::lexer::{Lexer, Token, TokenKind};
+use crate::position::{Position, Span, Spanned};
 
 pub struct Parser<'src> {
     source: &'src str,
@@ -17,7 +17,7 @@ pub enum ParseError {
     UnknownBuiltin(Span, InternStr),
 }
 
-type ParseResult<T> = Result<T,ParseError>;
+type ParseResult<T> = Result<T, ParseError>;
 type ParseFunc<T> = fn(&mut Parser) -> ParseResult<T>;
 
 impl<'src> Parser<'src> {
@@ -45,7 +45,7 @@ impl<'src> Parser<'src> {
 
     fn peek_slice(&self) -> &'src str {
         let span = &self.tokens[self.cursor].span;
-        &self.source[span.start.abs .. span.end.abs]
+        &self.source[span.start.abs..span.end.abs]
     }
 
     fn start_pos(&self) -> Position {
@@ -119,7 +119,10 @@ impl<'src> Parser<'src> {
             }
             _ => {
                 static VEC: &[TokenKind] = &[
-                    TokenKind::LitInt, TokenKind::LitReal, TokenKind::LitBool, TokenKind::LitChar
+                    TokenKind::LitInt,
+                    TokenKind::LitReal,
+                    TokenKind::LitBool,
+                    TokenKind::LitChar,
                 ];
                 Err(self.err_unexpected_many(VEC))
             }
@@ -146,13 +149,15 @@ impl<'src> Parser<'src> {
             }
             _ => {
                 static VEC: &[TokenKind] = &[
-                    TokenKind::TyInt, TokenKind::TyReal, TokenKind::TyBool, TokenKind::TyChar
+                    TokenKind::TyInt,
+                    TokenKind::TyReal,
+                    TokenKind::TyBool,
+                    TokenKind::TyChar,
                 ];
                 Err(self.err_unexpected_many(VEC))
             }
         }
     }
-    
 
     fn match_ident(&mut self) -> ParseResult<InternStr> {
         if self.peek_kind() == TokenKind::Ident {
@@ -197,9 +202,7 @@ impl<'src> Parser<'src> {
     fn option<T>(&mut self, func: ParseFunc<T>) -> ParseResult<Option<T>> {
         let last = self.cursor;
         match func(self) {
-            Ok(res) => {
-                Ok(Some(res))
-            }
+            Ok(res) => Ok(Some(res)),
             Err(err) => {
                 // if it failed without consuming any token
                 if self.cursor == last {
@@ -211,7 +214,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn many<T>(&mut self, func: ParseFunc<T>) -> ParseResult<Vec<T>> {      
+    fn many<T>(&mut self, func: ParseFunc<T>) -> ParseResult<Vec<T>> {
         let mut vec = Vec::new();
         let mut last = self.cursor;
         loop {
@@ -275,14 +278,13 @@ pub fn parse_expr(p: &mut Parser) -> ParseResult<Expr> {
         let args = p.sepby(TokenKind::Comma, parse_expr)?;
         p.match_token(TokenKind::RParen)?;
         let span = Span::new(start, p.end_pos());
-        Ok((args,span))
+        Ok((args, span))
     })?;
-    let res = applys.into_iter()
-        .fold(expr, |func,(args,span)| {
-            let span = Span::merge(func.span(),&span);
-            let func = Box::new(func);
-            Expr::App { func, args, span }
-        });
+    let res = applys.into_iter().fold(expr, |func, (args, span)| {
+        let span = Span::merge(func.span(), &span);
+        let func = Box::new(func);
+        Expr::App { func, args, span }
+    });
     Ok(res)
 }
 
@@ -291,12 +293,12 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
     match p.peek_kind() {
         TokenKind::LitInt | TokenKind::LitReal | TokenKind::LitBool | TokenKind::LitChar => {
             let lit = p.match_lit_val().unwrap();
-            let span = Span::new(start,p.end_pos());
+            let span = Span::new(start, p.end_pos());
             Ok(Expr::Lit { lit, span })
         }
         TokenKind::Ident => {
             let var = p.match_ident().unwrap();
-            let span = Span::new(start,p.end_pos());
+            let span = Span::new(start, p.end_pos());
             Ok(Expr::Var { var, span })
         }
         TokenKind::Builtin => {
@@ -304,7 +306,7 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
             p.match_token(TokenKind::LParen)?;
             let args = p.sepby(TokenKind::Comma, parse_expr)?;
             p.match_token(TokenKind::RParen)?;
-            let span = Span::new(start,p.end_pos());
+            let span = Span::new(start, p.end_pos());
             Ok(Expr::Prim { prim, args, span })
         }
         TokenKind::Fun => {
@@ -314,7 +316,7 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
             p.match_token(TokenKind::RParen)?;
             p.match_token(TokenKind::EArrow)?;
             let body = Box::new(parse_expr(p)?);
-            let span = Span::new(start,p.end_pos());
+            let span = Span::new(start, p.end_pos());
             Ok(Expr::Fun { pars, body, span })
         }
         TokenKind::Let => {
@@ -324,8 +326,13 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
             let expr = Box::new(parse_expr(p)?);
             p.match_token(TokenKind::Semi)?;
             let cont = Box::new(parse_expr(p)?);
-            let span = Span::new(start,p.end_pos());
-            Ok(Expr::Let { bind, expr, cont, span })
+            let span = Span::new(start, p.end_pos());
+            Ok(Expr::Let {
+                bind,
+                expr,
+                cont,
+                span,
+            })
         }
         TokenKind::Case => {
             p.match_token(TokenKind::Case).unwrap();
@@ -336,40 +343,50 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
                 parse_rule(p)
             })?;
             p.match_token(TokenKind::End)?;
-            let span = Span::new(start,p.end_pos());
+            let span = Span::new(start, p.end_pos());
             Ok(Expr::Case { expr, rules, span })
         }
         TokenKind::Begin => {
             p.match_token(TokenKind::Begin).unwrap();
-            let decls = p.option(|p| {
-                let decls = p.many(parse_decl)?;
-                p.match_token(TokenKind::In)?;
-                Ok(decls)
-            })?.unwrap_or(Vec::new());
+            let decls = p
+                .option(|p| {
+                    let decls = p.many(parse_decl)?;
+                    p.match_token(TokenKind::In)?;
+                    Ok(decls)
+                })?
+                .unwrap_or(Vec::new());
             let cont = Box::new(parse_expr(p)?);
             p.match_token(TokenKind::End)?;
-            let span = Span::new(start,p.end_pos());
+            let span = Span::new(start, p.end_pos());
             Ok(Expr::Blk { decls, cont, span })
         }
         TokenKind::LParen => {
             p.match_token(TokenKind::LParen).unwrap();
             let mut expr = parse_expr(p)?;
             p.match_token(TokenKind::RParen)?;
-            *expr.span_mut() = Span::new(start,p.end_pos());
+            *expr.span_mut() = Span::new(start, p.end_pos());
             Ok(expr)
         }
         TokenKind::LBrace => {
             p.match_token(TokenKind::LBrace).unwrap();
             let mut expr = parse_expr(p)?;
             p.match_token(TokenKind::RBrace)?;
-            *expr.span_mut() = Span::new(start,p.end_pos());
+            *expr.span_mut() = Span::new(start, p.end_pos());
             Ok(expr)
         }
         _ => {
             static VEC: &[TokenKind] = &[
-                TokenKind::LitInt, TokenKind::LitReal, TokenKind::LitBool, TokenKind::LitChar,
-                TokenKind::Ident, TokenKind::Builtin, TokenKind::Fun, TokenKind::Let,
-                TokenKind::Case, TokenKind::Begin, TokenKind::LParen,
+                TokenKind::LitInt,
+                TokenKind::LitReal,
+                TokenKind::LitBool,
+                TokenKind::LitChar,
+                TokenKind::Ident,
+                TokenKind::Builtin,
+                TokenKind::Fun,
+                TokenKind::Let,
+                TokenKind::Case,
+                TokenKind::Begin,
+                TokenKind::LParen,
             ];
             Err(p.err_unexpected_many(VEC))
         }
@@ -381,8 +398,8 @@ fn parse_pattern(p: &mut Parser) -> ParseResult<Pattern> {
     match p.peek_kind() {
         TokenKind::LitInt | TokenKind::LitReal | TokenKind::LitBool | TokenKind::LitChar => {
             let lit = p.match_lit_val().unwrap();
-            let span = Span::new(start,p.end_pos());
-            Ok(Pattern::Lit{ lit, span })
+            let span = Span::new(start, p.end_pos());
+            Ok(Pattern::Lit { lit, span })
         }
         TokenKind::Ident => {
             let var = p.match_ident().unwrap();
@@ -390,10 +407,14 @@ fn parse_pattern(p: &mut Parser) -> ParseResult<Pattern> {
                 p.match_token(TokenKind::LParen).unwrap();
                 let pars = p.sepby(TokenKind::Comma, parse_pattern)?;
                 p.match_token(TokenKind::RParen)?;
-                let span = Span::new(start,p.end_pos());
-                Ok(Pattern::Cons { cons: var, pars, span })
+                let span = Span::new(start, p.end_pos());
+                Ok(Pattern::Cons {
+                    cons: var,
+                    pars,
+                    span,
+                })
             } else {
-                let span = Span::new(start,p.end_pos());
+                let span = Span::new(start, p.end_pos());
                 Ok(Pattern::Var { var, span })
             }
         }
@@ -403,8 +424,11 @@ fn parse_pattern(p: &mut Parser) -> ParseResult<Pattern> {
         }
         _ => {
             static VEC: &[TokenKind] = &[
-                TokenKind::LitInt, /*TokenKind::LitReal,*/ TokenKind::LitBool, TokenKind::LitChar,
-                TokenKind::Ident, TokenKind::Wild,
+                TokenKind::LitInt,
+                /*TokenKind::LitReal,*/ TokenKind::LitBool,
+                TokenKind::LitChar,
+                TokenKind::Ident,
+                TokenKind::Wild,
             ];
             Err(p.err_unexpected_many(VEC))
         }
@@ -418,7 +442,7 @@ fn parse_rule(p: &mut Parser) -> ParseResult<Rule> {
     p.match_token(TokenKind::LBrace)?;
     let body = parse_expr(p)?;
     p.match_token(TokenKind::RBrace)?;
-    let span = Span::new(start,p.end_pos());
+    let span = Span::new(start, p.end_pos());
     Ok(Rule { patn, body, span })
 }
 
@@ -433,46 +457,63 @@ pub fn parse_decl(p: &mut Parser) -> ParseResult<Decl> {
             p.match_token(TokenKind::RParen)?;
             p.match_token(TokenKind::EArrow)?;
             let body = Box::new(parse_expr(p)?);
-            let span = Span::new(start,p.end_pos());
-            Ok(Decl::Func { name, pars, body, span })
+            let span = Span::new(start, p.end_pos());
+            Ok(Decl::Func {
+                name,
+                pars,
+                body,
+                span,
+            })
         }
         TokenKind::Data => {
             p.match_token(TokenKind::Data).unwrap();
             let name = p.match_ident()?;
-            let pars = p.option(|p| {
-                p.match_token(TokenKind::LBracket)?;
-                let pars = p.sepby1(TokenKind::Comma, |p| p.match_ident())?;
-                p.match_token(TokenKind::RBracket)?;
-                Ok(pars)
-            })?.unwrap_or(Vec::new());
+            let pars = p
+                .option(|p| {
+                    p.match_token(TokenKind::LBracket)?;
+                    let pars = p.sepby1(TokenKind::Comma, |p| p.match_ident())?;
+                    p.match_token(TokenKind::RBracket)?;
+                    Ok(pars)
+                })?
+                .unwrap_or(Vec::new());
             p.match_token(TokenKind::Equal)?;
             let vars = p.many1(|p| {
                 p.match_token(TokenKind::Bar)?;
                 parse_varient(p)
             })?;
             p.match_token(TokenKind::End)?;
-            let span = Span::new(start,p.end_pos());
-            Ok(Decl::Data { name, pars, vars, span })
+            let span = Span::new(start, p.end_pos());
+            Ok(Decl::Data {
+                name,
+                pars,
+                vars,
+                span,
+            })
         }
         TokenKind::Type => {
             p.match_token(TokenKind::Type).unwrap();
             let name = p.match_ident()?;
-            let pars = p.option(|p| {
-                p.match_token(TokenKind::LBracket)?;
-                let pars = p.sepby1(TokenKind::Comma, |p| p.match_ident())?;
-                p.match_token(TokenKind::RBracket)?;
-                Ok(pars)
-            })?.unwrap_or(Vec::new());
+            let pars = p
+                .option(|p| {
+                    p.match_token(TokenKind::LBracket)?;
+                    let pars = p.sepby1(TokenKind::Comma, |p| p.match_ident())?;
+                    p.match_token(TokenKind::RBracket)?;
+                    Ok(pars)
+                })?
+                .unwrap_or(Vec::new());
             p.match_token(TokenKind::Equal)?;
             let typ = parse_type(p)?;
             p.match_token(TokenKind::Semi)?;
-            let span = Span::new(start,p.end_pos());
-            Ok(Decl::Type { name, pars, typ, span })
+            let span = Span::new(start, p.end_pos());
+            Ok(Decl::Type {
+                name,
+                pars,
+                typ,
+                span,
+            })
         }
         _ => {
-            static VEC: &[TokenKind] = &[
-                TokenKind::Fun, TokenKind::Data, TokenKind::Type,
-            ];
+            static VEC: &[TokenKind] = &[TokenKind::Fun, TokenKind::Data, TokenKind::Type];
             Err(p.err_unexpected_many(VEC))
         }
     }
@@ -481,13 +522,15 @@ pub fn parse_decl(p: &mut Parser) -> ParseResult<Decl> {
 pub fn parse_varient(p: &mut Parser) -> ParseResult<Varient> {
     let start = p.start_pos();
     let cons = p.match_ident()?;
-    let pars = p.option(|p| {
-        p.match_token(TokenKind::LParen)?;
-        let pars = p.sepby1(TokenKind::Semi, parse_type)?;
-        p.match_token(TokenKind::RParen)?;
-        Ok(pars)
-    })?.unwrap_or(Vec::new());
-    let span = Span::new(start,p.end_pos());
+    let pars = p
+        .option(|p| {
+            p.match_token(TokenKind::LParen)?;
+            let pars = p.sepby1(TokenKind::Semi, parse_type)?;
+            p.match_token(TokenKind::RParen)?;
+            Ok(pars)
+        })?
+        .unwrap_or(Vec::new());
+    let span = Span::new(start, p.end_pos());
     Ok(Varient { cons, pars, span })
 }
 
@@ -499,14 +542,13 @@ fn parse_type(p: &mut Parser) -> ParseResult<MonoType> {
         let args = p.sepby(TokenKind::Comma, parse_type)?;
         p.match_token(TokenKind::RBracket)?;
         let span = Span::new(start, p.end_pos());
-        Ok((args,span))
+        Ok((args, span))
     })?;
-    let res = applys.into_iter()
-        .fold(typ, |func,(args,_span)| {
-            // let span = Span::merge(typ.span(), &_span);
-            let func = Box::new(func);
-            MonoType::App(func, args)
-        });
+    let res = applys.into_iter().fold(typ, |func, (args, _span)| {
+        // let span = Span::merge(typ.span(), &_span);
+        let func = Box::new(func);
+        MonoType::App(func, args)
+    });
     Ok(res)
 }
 
@@ -528,12 +570,16 @@ pub fn parse_type_no_app(p: &mut Parser) -> ParseResult<MonoType> {
             p.match_token(TokenKind::RParen)?;
             p.match_token(TokenKind::Arrow)?;
             let body = Box::new(parse_type_no_app(p)?);
-            Ok(MonoType::Fun(pars,body))
+            Ok(MonoType::Fun(pars, body))
         }
         _ => {
             static VEC: &[TokenKind] = &[
-                TokenKind::LitInt, /*TokenKind::LitReal,*/ TokenKind::LitBool, TokenKind::LitChar,
-                TokenKind::Ident, TokenKind::Wild,
+                TokenKind::LitInt,
+                // TokenKind::LitReal,
+                TokenKind::LitBool,
+                TokenKind::LitChar,
+                TokenKind::Ident,
+                TokenKind::Wild,
             ];
             Err(p.err_unexpected_many(VEC))
         }

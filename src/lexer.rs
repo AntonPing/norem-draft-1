@@ -1,6 +1,6 @@
+use crate::position::{Position, Span, Spanned};
 use std::fmt;
 use std::str::Chars;
-use crate::position::{Position, Span, Spanned};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TokenKind {
@@ -99,8 +99,10 @@ pub enum TokenKind {
 impl TokenKind {
     pub fn is_bad_token(&self) -> bool {
         match self {
-              TokenKind::FailedToken | TokenKind::FailedBlockComment
-            | TokenKind::LineComment | TokenKind::BlockComment
+            TokenKind::FailedToken
+            | TokenKind::FailedBlockComment
+            | TokenKind::LineComment
+            | TokenKind::BlockComment
             | TokenKind::EndOfFile => true,
             _ => false,
         }
@@ -148,7 +150,9 @@ pub fn as_keyword(str: &str) -> Option<TokenKind> {
         "Real" => TokenKind::TyReal,
         "Bool" => TokenKind::TyBool,
         "Char" => TokenKind::TyChar,
-        _ => { return None; }
+        _ => {
+            return None;
+        }
     };
     Some(tok)
 }
@@ -163,10 +167,8 @@ pub fn is_ident_body(ch: char) -> bool {
 
 pub fn is_opr_char(ch: char) -> bool {
     match ch {
-        ':' | '!' | '#' | '$' | '%' |
-        '&' | '*' | '+' | '.' | '/' |
-        '<' | '=' | '>' | '?' | '@' |
-        '\\' | '^' | '|' | '-' | '~' => true,
+        ':' | '!' | '#' | '$' | '%' | '&' | '*' | '+' | '.' | '/' | '<' | '=' | '>' | '?' | '@'
+        | '\\' | '^' | '|' | '-' | '~' => true,
         _ => false,
     }
 }
@@ -263,38 +265,76 @@ impl<'src> Lexer<'src> {
                 _ => {}
             }
             let end = self.get_pos();
-            let span = Span::new(start,end);
+            let span = Span::new(start, end);
             return Some(Token { kind, span });
-        }   
+        }
     }
-    
+
     pub fn next_token_kind(&mut self) -> TokenKind {
         match self.peek_first() {
-            Some('(') => { self.next_char(); TokenKind::LParen }
-            Some(')') => { self.next_char(); TokenKind::RParen }
-            Some('[') => { self.next_char(); TokenKind::LBracket }
-            Some(']') => { self.next_char(); TokenKind::RBracket }
-            Some('{') => { self.next_char(); TokenKind::LBrace }
-            Some('}') => { self.next_char(); TokenKind::RBrace }
-            Some(':') => { self.next_char(); TokenKind::Colon }
-            Some(';') => { self.next_char(); TokenKind::Semi }
-            Some(',') => { self.next_char(); TokenKind::Comma }
-            Some('.') => { self.next_char(); TokenKind::Dot }
-            Some('|') => { self.next_char(); TokenKind::Bar }
+            Some('(') => {
+                self.next_char();
+                TokenKind::LParen
+            }
+            Some(')') => {
+                self.next_char();
+                TokenKind::RParen
+            }
+            Some('[') => {
+                self.next_char();
+                TokenKind::LBracket
+            }
+            Some(']') => {
+                self.next_char();
+                TokenKind::RBracket
+            }
+            Some('{') => {
+                self.next_char();
+                TokenKind::LBrace
+            }
+            Some('}') => {
+                self.next_char();
+                TokenKind::RBrace
+            }
+            Some(':') => {
+                self.next_char();
+                TokenKind::Colon
+            }
+            Some(';') => {
+                self.next_char();
+                TokenKind::Semi
+            }
+            Some(',') => {
+                self.next_char();
+                TokenKind::Comma
+            }
+            Some('.') => {
+                self.next_char();
+                TokenKind::Dot
+            }
+            Some('|') => {
+                self.next_char();
+                TokenKind::Bar
+            }
             Some('=') => match self.peek_second() {
                 Some('>') => {
-                    self.next_char(); self.next_char();
+                    self.next_char();
+                    self.next_char();
                     TokenKind::EArrow
                 }
-                _ => { self.next_char(); TokenKind::Equal }
-            }
+                _ => {
+                    self.next_char();
+                    TokenKind::Equal
+                }
+            },
             Some('-') => match self.peek_second() {
                 Some('>') => {
-                    self.next_char(); self.next_char();
+                    self.next_char();
+                    self.next_char();
                     TokenKind::Arrow
                 }
-                _ => { self.operator() }
-            }
+                _ => self.operator(),
+            },
             Some('/') => match self.peek_second() {
                 Some('/') => {
                     self.line_comment();
@@ -307,15 +347,15 @@ impl<'src> Lexer<'src> {
                         TokenKind::FailedBlockComment
                     }
                 }
-                _ => { self.operator() }
+                _ => self.operator(),
             },
-            Some('@') => { self.builtin() }
-            Some('_') => { self.wildcard()}
-            Some(ch) if is_opr_char(ch) => { self.operator() }
-            Some(ch) if is_ident_first(ch) => { self.ident_or_keyword() }
-            Some(ch) if ch.is_ascii_digit() => { self.int_or_real() }
-            Some(_) => { self.failed_token() }
-            None => { TokenKind::EndOfFile }
+            Some('@') => self.builtin(),
+            Some('_') => self.wildcard(),
+            Some(ch) if is_opr_char(ch) => self.operator(),
+            Some(ch) if is_ident_first(ch) => self.ident_or_keyword(),
+            Some(ch) if ch.is_ascii_digit() => self.int_or_real(),
+            Some(_) => self.failed_token(),
+            None => TokenKind::EndOfFile,
         }
     }
 
@@ -419,18 +459,16 @@ impl<'src> Lexer<'src> {
     }
 }
 
-
 impl<'src> Iterator for Lexer<'src> {
     type Item = Token;
     fn next(&mut self) -> Option<Self::Item> {
         self.next_token()
-    } 
+    }
 }
 
 #[test]
 fn lexer_test() {
-    let string = 
-r#"
+    let string = r#"
 begin
     type My-Int = Int;
     type Option-Int = Option[Int];

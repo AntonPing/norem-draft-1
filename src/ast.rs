@@ -43,13 +43,13 @@ impl Builtin {
             Builtin::BOr => 2,
             Builtin::BNot => 1,
         }
-    }   
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr<Ident = InternStr> {
     Lit {
-        lit : LitVal,
+        lit: LitVal,
         span: Span,
     },
     Var {
@@ -133,7 +133,7 @@ impl Expr {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rule<Ident = InternStr> {
-    pub patn : Pattern<Ident>,
+    pub patn: Pattern<Ident>,
     pub body: Expr<Ident>,
     pub span: Span,
 }
@@ -196,9 +196,8 @@ pub enum Decl<Ident = InternStr> {
         pars: Vec<Ident>,
         typ: MonoType<Ident>,
         span: Span,
-    }
+    },
 }
-
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Varient<Ident = InternStr> {

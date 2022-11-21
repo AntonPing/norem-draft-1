@@ -1,5 +1,5 @@
 use std::default::Default;
-use std::fmt::{self, Debug};
+use std::fmt;
 use std::hash::Hash;
 
 /// module `position`
@@ -9,9 +9,9 @@ use std::hash::Hash;
 /// A `Position` is a location in the source code.
 /// The `abs` field is the absolute index of the character,
 /// while `row` and `col` fields are line number and column number
-/// 
+///
 /// # Example
-/// 
+///
 /// ```text
 /// Hello, world!
 /// This is an
