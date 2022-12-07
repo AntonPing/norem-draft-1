@@ -88,7 +88,7 @@ impl Display for Builtin {
     }
 }
 
-impl Display for Expr {
+impl<Ident: Display> Display for Expr<Ident> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Expr::Lit { lit, .. } => {
@@ -138,7 +138,7 @@ impl Display for Expr {
     }
 }
 
-impl Display for Pattern {
+impl<Ident: Display> Display for Pattern<Ident> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Pattern::Var { var, .. } => {
@@ -162,7 +162,7 @@ impl Display for Pattern {
     }
 }
 
-impl Display for Rule {
+impl<Ident: Display> Display for Rule<Ident> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Rule { patn, body, .. } = self;
         if body.is_simple() {
@@ -173,7 +173,7 @@ impl Display for Rule {
     }
 }
 
-impl Display for Varient {
+impl<Ident: Display> Display for Varient<Ident> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Varient { cons, pars, .. } = self;
         if pars.is_empty() {
@@ -185,7 +185,7 @@ impl Display for Varient {
     }
 }
 
-impl Display for Decl {
+impl<Ident: Display> Display for Decl<Ident> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Decl::Func {
@@ -228,7 +228,7 @@ impl Display for Decl {
     }
 }
 
-impl Display for MonoType {
+impl<Ident: Display> Display for MonoType<Ident> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             MonoType::Lit(lit) => {

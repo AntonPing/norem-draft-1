@@ -116,7 +116,7 @@ impl<Ident> Spanned for Expr<Ident> {
     }
 }
 
-impl Expr {
+impl<Ident> Expr<Ident> {
     pub fn is_simple(&self) -> bool {
         match self {
             Expr::Lit { .. } => true,
