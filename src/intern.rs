@@ -10,8 +10,13 @@ impl InternStr {
     pub fn new(index: usize) -> InternStr {
         InternStr { index }
     }
+    pub fn is_uppercase(&self) -> bool {
+        self.as_ref().chars().nth(0).unwrap().is_ascii_uppercase()
+    }
+    pub fn is_lowercase(&self) -> bool {
+        self.as_ref().chars().nth(0).unwrap().is_ascii_lowercase()
+    }
 }
-
 pub struct Interner {
     str_to_idx: HashMap<String, usize>,
     idx_to_str: Vec<String>,
@@ -27,6 +32,7 @@ impl Interner {
 
     pub fn intern<S: Into<String>>(&mut self, s: S) -> InternStr {
         let s: String = s.into();
+        assert_ne!(s.as_str(),"");
         if let Some(idx) = self.str_to_idx.get(&s) {
             InternStr { index: *idx }
         } else {

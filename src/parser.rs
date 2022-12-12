@@ -415,7 +415,12 @@ fn parse_pattern(p: &mut Parser) -> ParseResult<Pattern> {
                 })
             } else {
                 let span = Span::new(start, p.end_pos());
-                Ok(Pattern::Var { var, span })
+                if var.is_uppercase() {
+                    // abbreviate `| Cons() => ...` to `| Cons => ...`
+                    Ok(Pattern::Cons { cons: var, pars: Vec::new(), span })
+                } else {
+                    Ok(Pattern::Var { var, span })
+                }
             }
         }
         TokenKind::Wild => {
@@ -610,4 +615,5 @@ end
     let mut par = Parser::new(string);
     let res = parse_expr(&mut par);
     assert!(res.is_ok());
+    // println!("{}", res.unwrap());
 }
