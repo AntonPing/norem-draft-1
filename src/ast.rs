@@ -194,15 +194,25 @@ pub enum Decl<Ident = InternStr> {
     Type {
         name: Ident,
         pars: Vec<Ident>,
-        typ: MonoType<Ident>,
+        typ: Type<Ident>,
         span: Span,
     },
+}
+
+impl<Ident> Decl<Ident> {
+    pub fn get_name(&self) -> &Ident {
+        match self {
+            Decl::Func { name, .. } => name,
+            Decl::Data { name, .. } => name,
+            Decl::Type { name, .. } => name,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Varient<Ident = InternStr> {
     pub cons: Ident,
-    pub pars: Vec<MonoType<Ident>>,
+    pub pars: Vec<Type<Ident>>,
     pub span: Span,
 }
 
@@ -232,15 +242,42 @@ pub enum LitType {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum MonoType<Ident = InternStr> {
-    Lit(LitType),
-    Var(Ident),
-    Fun(Vec<MonoType<Ident>>, Box<MonoType<Ident>>),
-    App(Box<MonoType<Ident>>, Vec<MonoType<Ident>>),
+pub enum Type<Ident = InternStr> {
+    Lit {
+        lit: LitType,
+        span: Span,
+    },
+    Var {
+        var: Ident,
+        span: Span,
+    },
+    Fun {
+        pars: Vec<Type<Ident>>,
+        res: Box<Type<Ident>>,
+        span: Span,
+    },
+    App {
+        cons: Ident,
+        args: Vec<Type<Ident>>,
+        span: Span,
+    },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PolyType<Ident = InternStr> {
-    pars: Vec<Ident>,
-    body: MonoType,
+impl<Ident> Spanned for Type<Ident> {
+    fn span(&self) -> &Span {
+        match self {
+            Type::Lit { span, .. } => span,
+            Type::Var { span, .. } => span,
+            Type::Fun { span, .. } => span,
+            Type::App { span, .. } => span,
+        }
+    }
+    fn span_mut(&mut self) -> &mut Span {
+        match self {
+            Type::Lit { span, .. } => span,
+            Type::Var { span, .. } => span,
+            Type::Fun { span, .. } => span,
+            Type::App { span, .. } => span,
+        }
+    }
 }

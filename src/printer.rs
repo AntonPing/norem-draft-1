@@ -228,20 +228,20 @@ impl<Ident: Display> Display for Decl<Ident> {
     }
 }
 
-impl<Ident: Display> Display for MonoType<Ident> {
+impl<Ident: Display> Display for Type<Ident> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            MonoType::Lit(lit) => {
+            Type::Lit { lit, .. } => {
                 write!(f, "{lit}")
             }
-            MonoType::Var(var) => {
+            Type::Var { var, .. } => {
                 write!(f, "{var}")
             }
-            MonoType::Fun(args, res) => {
-                let args = args.iter().format(&", ");
-                write!(f, "fn ({args}) -> {res}")
+            Type::Fun { pars, res, .. } => {
+                let pars = pars.iter().format(&", ");
+                write!(f, "fn ({pars}) -> {res}")
             }
-            MonoType::App(cons, args) => {
+            Type::App { cons, args, .. } => {
                 assert!(!args.is_empty());
                 let args = args.iter().format(&", ");
                 write!(f, "{cons}[{args}]")
