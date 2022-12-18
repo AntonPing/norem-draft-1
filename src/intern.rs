@@ -10,6 +10,9 @@ impl InternStr {
     pub fn new(index: usize) -> InternStr {
         InternStr { index }
     }
+    pub fn to_unique(self) -> Unique {
+        Unique::from_intern(self)
+    }
     pub fn is_uppercase(&self) -> bool {
         self.as_ref().chars().nth(0).unwrap().is_ascii_uppercase()
     }
@@ -17,6 +20,7 @@ impl InternStr {
         self.as_ref().chars().nth(0).unwrap().is_ascii_lowercase()
     }
 }
+
 pub struct Interner {
     str_to_idx: HashMap<String, usize>,
     idx_to_str: Vec<String>,
@@ -32,7 +36,7 @@ impl Interner {
 
     pub fn intern<S: Into<String>>(&mut self, s: S) -> InternStr {
         let s: String = s.into();
-        assert_ne!(s.as_str(),"");
+        assert_ne!(s.as_str(), "");
         if let Some(idx) = self.str_to_idx.get(&s) {
             InternStr { index: *idx }
         } else {
@@ -86,6 +90,51 @@ impl fmt::Display for InternStr {
     }
 }
 
+static mut COUNTER: usize = 0;
+
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+pub struct Unique {
+    pub ident: InternStr,
+    pub index: usize,
+}
+
+impl fmt::Debug for Unique {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}.{}", self.ident, self.index)
+    }
+}
+
+impl fmt::Display for Unique {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}.{}", self.ident, self.index)
+    }
+}
+
+impl Unique {
+    pub fn new(ident: InternStr, index: usize) -> Unique {
+        Unique { ident, index }
+    }
+
+    pub fn from_intern(ident: InternStr) -> Unique {
+        unsafe {
+            let index = COUNTER;
+            COUNTER += 1;
+            Unique { ident, index }
+        }
+    }
+
+    pub fn rename(&self) -> Unique {
+        unsafe {
+            let index = COUNTER;
+            COUNTER += 1;
+            Unique {
+                ident: self.ident,
+                index,
+            }
+        }
+    }
+}
+
 #[test]
 fn intern_test() {
     let foo1: &str = "foo";
@@ -107,4 +156,18 @@ fn intern_test() {
     assert_eq!(format!("{}", s2), "foo");
     assert_eq!(format!("{}", s3), "bar");
     assert_eq!(format!("{}", s4), "bar");
+}
+
+#[test]
+fn unique_test() {
+    let baz: &str = "baz";
+
+    let s1 = intern(baz);
+    let x1 = s1.to_unique();
+    let x2 = s1.to_unique();
+    let x3 = s1.to_unique();
+
+    assert_ne!(x1, x2);
+    assert_ne!(x1, x3);
+    assert_ne!(x2, x3);
 }
