@@ -1,0 +1,3 @@
+# default setting is good enough
+# except for one thing...
+reorder_modules = false

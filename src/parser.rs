@@ -417,7 +417,11 @@ fn parse_pattern(p: &mut Parser) -> ParseResult<Pattern> {
                 let span = Span::new(start, p.end_pos());
                 if var.is_uppercase() {
                     // abbreviate `| Cons() => ...` to `| Cons => ...`
-                    Ok(Pattern::Cons { cons: var, pars: Vec::new(), span })
+                    Ok(Pattern::Cons {
+                        cons: var,
+                        pars: Vec::new(),
+                        span,
+                    })
                 } else {
                     Ok(Pattern::Var { var, span })
                 }
@@ -554,7 +558,11 @@ fn parse_type(p: &mut Parser) -> ParseResult<Type> {
                 let args = p.sepby1(TokenKind::Comma, parse_type)?;
                 p.match_token(TokenKind::RBracket)?;
                 let span = Span::new(start, p.end_pos());
-                Ok(Type::App { cons: var, args, span })
+                Ok(Type::App {
+                    cons: var,
+                    args,
+                    span,
+                })
             } else {
                 let span = Span::new(start, p.end_pos());
                 Ok(Type::Var { var, span })
