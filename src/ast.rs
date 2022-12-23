@@ -9,6 +9,17 @@ pub enum LitVal {
     Char(char),
 }
 
+impl LitVal {
+    pub fn get_lit_type(&self) -> LitType {
+        match self {
+            LitVal::Int(_) => LitType::Int,
+            LitVal::Real(_) => LitType::Real,
+            LitVal::Bool(_) => LitType::Bool,
+            LitVal::Char(_) => LitType::Char,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Builtin {
     IAdd,

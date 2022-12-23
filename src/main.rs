@@ -6,6 +6,7 @@ pub mod position;
 pub mod printer;
 pub mod env_map;
 pub mod renamer;
+pub mod infer;
 
 fn main() {
     println!("Hello, world!");
