@@ -7,6 +7,7 @@ pub mod printer;
 pub mod env_map;
 pub mod renamer;
 pub mod infer;
+pub mod diagnostic;
 
 fn main() {
     println!("Hello, world!");
