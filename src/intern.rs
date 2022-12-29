@@ -7,9 +7,6 @@ pub struct InternStr {
 }
 
 impl InternStr {
-    pub fn new(index: usize) -> InternStr {
-        InternStr { index }
-    }
     pub fn to_unique(self) -> Unique {
         Unique::from_intern(self)
     }
@@ -27,10 +24,15 @@ pub struct Interner {
 }
 
 impl Interner {
-    pub fn new() -> Interner {
+    fn new() -> Interner {
+        let map = ('a'..='z')
+            .enumerate()
+            .map(|(i, s)| (s.to_string(), i))
+            .collect();
+        let vec = ('a'..='z').map(|ch| ch.to_string()).collect();
         Interner {
-            str_to_idx: HashMap::new(),
-            idx_to_str: Vec::new(),
+            str_to_idx: map,
+            idx_to_str: vec,
         }
     }
 
@@ -111,10 +113,6 @@ impl fmt::Display for Unique {
 }
 
 impl Unique {
-    pub fn new(ident: InternStr, index: usize) -> Unique {
-        Unique { ident, index }
-    }
-
     pub fn from_intern(ident: InternStr) -> Unique {
         unsafe {
             let index = COUNTER;
@@ -123,20 +121,21 @@ impl Unique {
         }
     }
 
+    pub fn generate(ch: char) -> Unique {
+        assert!(ch.is_ascii_alphabetic() && ch.is_ascii_lowercase());
+        let n = ch as u8 - 'a' as u8;
+        let ident = InternStr { index: n as usize };
+        Unique::from_intern(ident)
+    }
+
     pub fn rename(&self) -> Unique {
-        unsafe {
-            let index = COUNTER;
-            COUNTER += 1;
-            Unique {
-                ident: self.ident,
-                index,
-            }
-        }
+        Unique::from_intern(self.ident)
     }
 }
 
 #[test]
 fn intern_test() {
+    // test function `intern`
     let foo1: &str = "foo";
     let foo2: String = "foo".to_string();
     let bar1: &str = "bar";
@@ -160,14 +159,25 @@ fn intern_test() {
 
 #[test]
 fn unique_test() {
+    // test function `Unique::from_intern`
     let baz: &str = "baz";
-
     let s1 = intern(baz);
-    let x1 = s1.to_unique();
-    let x2 = s1.to_unique();
-    let x3 = s1.to_unique();
+    let u1 = Unique::from_intern(s1);
+    let u2 = Unique::from_intern(s1);
+    assert_ne!(u1, u2);
+    assert_eq!(u1.ident, u2.ident);
 
-    assert_ne!(x1, x2);
-    assert_ne!(x1, x3);
-    assert_ne!(x2, x3);
+    // test function `Unique::generate`
+    let s1 = intern('x');
+    let u1 = Unique::from_intern(s1);
+    let u2 = Unique::generate('x');
+    assert_ne!(u1, u2);
+    assert_eq!(u1.ident, u2.ident);
+
+    // test function `Unique::rename`
+    let s1 = intern('x');
+    let u1 = Unique::from_intern(s1);
+    let u2 = u1.rename();
+    assert_ne!(u1, u2);
+    assert_eq!(u1.ident, u2.ident);
 }
