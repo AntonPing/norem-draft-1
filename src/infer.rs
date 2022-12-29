@@ -145,30 +145,23 @@ pub struct Infer {
     cons_env: HashMap<Unique, DataCons>,
     data_env: HashMap<Unique, DataDecl>,
     type_env: HashMap<Unique, TypeDecl>,
-    name_pool: [InternStr; 27],
     level: usize,
     error: Vec<InferError>,
 }
 
 impl Infer {
     pub fn new() -> Infer {
-        let mut vec: Vec<InternStr> = Vec::new();
-        for ch in 'a'..='z' {
-            vec.push(intern(ch));
-        }
-        vec.push(intern('?'));
         Infer {
             val_env: HashMap::new(),
             cons_env: HashMap::new(),
             data_env: HashMap::new(),
             type_env: HashMap::new(),
-            name_pool: vec.try_into().unwrap(),
             level: 0,
             error: Vec::new(),
         }
     }
     fn new_cell(&self) -> Rc<RefCell<TypeCell<Unique>>> {
-        let name = self.name_pool[19].to_unique(); // self.name_pool[19] = intern("t");
+        let name = Unique::generate('t'); // self.name_pool[19] = intern("t");
         Rc::new(RefCell::new(TypeCell::Unbound(name, self.level)))
     }
 
@@ -290,7 +283,9 @@ impl Infer {
                                 TypeBase::Var(*var, ())
                             } else {
                                 // todo: more than 26 type parameters?!!
-                                let var = self.name_pool[map.len()].to_unique();
+                                assert!(map.len() < 26);
+                                let n = map.len() as u8 + 'a' as u8;
+                                let var = Unique::generate(n as char);
                                 map.insert(*name, var);
                                 TypeBase::Var(var, ())
                             }
