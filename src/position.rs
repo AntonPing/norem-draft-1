@@ -60,6 +60,12 @@ impl fmt::Debug for Position {
     }
 }
 
+impl fmt::Display for Position {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
+        write!(f, "line {}, col {}", self.row + 1, self.col + 1)
+    }
+}
+
 /// A `Span` is a structure of two position.
 /// It marks the `start` and the `end` of a slice in source code.
 #[derive(Clone, Copy, Default, Eq, Hash, PartialEq)]
@@ -82,6 +88,12 @@ impl Span {
 impl fmt::Debug for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
         write!(f, "[{:?}..{:?}]", self.start, self.end)
+    }
+}
+
+impl fmt::Display for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
+        write!(f, "from {} to {}", self.start, self.end)
     }
 }
 
