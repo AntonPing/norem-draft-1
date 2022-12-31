@@ -1,14 +1,24 @@
 use std::collections::HashMap;
 use std::{fmt, ops, sync::Mutex};
 
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct InternStr {
     index: usize,
 }
 
 impl InternStr {
+    pub fn as_dummy(self) -> Unique {
+        Unique {
+            ident: self,
+            index: 0,
+        }
+    }
     pub fn to_unique(self) -> Unique {
-        Unique::from_intern(self)
+        unsafe {
+            let index = COUNTER;
+            COUNTER += 1;
+            Unique { ident: self, index }
+        }
     }
     pub fn is_uppercase(&self) -> bool {
         self.as_ref().chars().nth(0).unwrap().is_ascii_uppercase()
@@ -92,9 +102,10 @@ impl fmt::Display for InternStr {
     }
 }
 
-static mut COUNTER: usize = 0;
+// start from 1, becase 0 is for dummy variables
+static mut COUNTER: usize = 1;
 
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Unique {
     pub ident: InternStr,
     pub index: usize,
@@ -102,34 +113,26 @@ pub struct Unique {
 
 impl fmt::Debug for Unique {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}.{}", self.ident, self.index)
+        write!(f, "{:?}_{}", self.ident, self.index)
     }
 }
 
 impl fmt::Display for Unique {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}.{}", self.ident, self.index)
+        write!(f, "{}_{}", self.ident, self.index)
     }
 }
 
 impl Unique {
-    pub fn from_intern(ident: InternStr) -> Unique {
-        unsafe {
-            let index = COUNTER;
-            COUNTER += 1;
-            Unique { ident, index }
-        }
-    }
-
     pub fn generate(ch: char) -> Unique {
         assert!(ch.is_ascii_alphabetic() && ch.is_ascii_lowercase());
         let n = ch as u8 - 'a' as u8;
         let ident = InternStr { index: n as usize };
-        Unique::from_intern(ident)
+        ident.to_unique()
     }
 
     pub fn rename(&self) -> Unique {
-        Unique::from_intern(self.ident)
+        self.ident.to_unique()
     }
 }
 
@@ -162,21 +165,21 @@ fn unique_test() {
     // test function `Unique::from_intern`
     let baz: &str = "baz";
     let s1 = intern(baz);
-    let u1 = Unique::from_intern(s1);
-    let u2 = Unique::from_intern(s1);
+    let u1 = s1.to_unique();
+    let u2 = s1.to_unique();
     assert_ne!(u1, u2);
     assert_eq!(u1.ident, u2.ident);
 
     // test function `Unique::generate`
     let s1 = intern('x');
-    let u1 = Unique::from_intern(s1);
+    let u1 = s1.to_unique();
     let u2 = Unique::generate('x');
     assert_ne!(u1, u2);
     assert_eq!(u1.ident, u2.ident);
 
     // test function `Unique::rename`
     let s1 = intern('x');
-    let u1 = Unique::from_intern(s1);
+    let u1 = s1.to_unique();
     let u2 = u1.rename();
     assert_ne!(u1, u2);
     assert_eq!(u1.ident, u2.ident);
