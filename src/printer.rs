@@ -1,35 +1,41 @@
 use crate::ast::*;
 use itertools::{self, Itertools};
 use std::fmt::{self, Debug, Display};
+use std::cell::Cell;
 
 pub struct INDT;
 pub struct DEDT;
 pub struct NWLN;
 
-static mut INDT_LEVEL: usize = 0;
+thread_local! {
+    static INDT_LEVEL: Cell<usize> = Cell::new(0);
+}
 
 impl Display for INDT {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        unsafe {
-            INDT_LEVEL += 1;
-        }
+        INDT_LEVEL.with(|c| {
+            let x = c.get();
+            c.set(x + 1);
+        });
         Ok(())
     }
 }
 
 impl Display for DEDT {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        unsafe {
-            INDT_LEVEL -= 1;
-        }
+        INDT_LEVEL.with(|c| {
+            let x = c.get();
+            c.set(x - 1);
+        });
         Ok(())
     }
 }
 
 impl Display for NWLN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "")?;
-        write!(f, "{:width$}", "", width = unsafe { INDT_LEVEL * 2 })
+        INDT_LEVEL.with(|c| {
+            write!(f, "\n{:width$}", "", width = c.get() * 2)
+        })
     }
 }
 
