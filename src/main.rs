@@ -9,6 +9,7 @@ pub mod renamer;
 pub mod infer;
 pub mod diagnostic;
 pub mod anf;
+pub mod normalize;
 
 fn main() {
     println!("Hello, world!");
