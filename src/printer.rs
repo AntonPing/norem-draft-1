@@ -1,7 +1,8 @@
+use crate::anf::*;
 use crate::ast::*;
 use itertools::{self, Itertools};
-use std::fmt::{self, Debug, Display};
 use std::cell::Cell;
+use std::fmt::{self, Debug, Display};
 
 pub struct INDT;
 pub struct DEDT;
@@ -33,9 +34,7 @@ impl Display for DEDT {
 
 impl Display for NWLN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        INDT_LEVEL.with(|c| {
-            write!(f, "\n{:width$}", "", width = c.get() * 2)
-        })
+        INDT_LEVEL.with(|c| write!(f, "\n{:width$}", "", width = c.get() * 2))
     }
 }
 
@@ -253,6 +252,65 @@ impl<Ident: Display> Display for Type<Ident> {
                 write!(f, "{cons}[{args}]")
             }
         }
+    }
+}
+
+impl Display for MExpr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            MExpr::LetIn { decls, cont } => {
+                write!(f, "letrec{INDT}")?;
+                for decl in decls {
+                    write!(f, "{NWLN}{decl}")?;
+                }
+                write!(f, "{DEDT}{NWLN}in{INDT}{NWLN}{cont}{DEDT}{NWLN}end")
+            }
+            MExpr::Stmt {
+                bind,
+                prim,
+                args,
+                cont,
+            } => {
+                let args = args.iter().format(&", ");
+                if let Some(x) = bind {
+                    write!(f, "let {x} = {prim}({args});{NWLN}{cont}")
+                } else {
+                    write!(f, "{prim}({args});{NWLN}{cont}")
+                }
+            }
+            MExpr::Brch { prim, args, conts } => {
+                let args = args.iter().format(&", ");
+                write!(f, "{prim}({args}) begin")?;
+                for cont in conts {
+                    write!(f, " {{{INDT}{NWLN}{cont}{DEDT}{NWLN}}} ")?;
+                }
+                write!(f, "end")
+            }
+            MExpr::Call {
+                bind,
+                func,
+                args,
+                cont,
+            } => {
+                let args = args.iter().format(&", ");
+                if let Some(x) = bind {
+                    write!(f, "let {x} = {func}({args});{NWLN}{cont}")
+                } else {
+                    write!(f, "{func}({args});{NWLN}{cont}")
+                }
+            }
+            MExpr::Retn { atom } => {
+                write!(f, "return {atom}")
+            }
+        }
+    }
+}
+
+impl Display for MDecl {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let MDecl { func, pars, body } = self;
+        let pars = pars.iter().format(&", ");
+        write!(f, "fun {func}({pars}) = {INDT}{NWLN}{body}{DEDT}")
     }
 }
 
