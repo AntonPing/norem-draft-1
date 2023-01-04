@@ -10,6 +10,7 @@ pub mod infer;
 pub mod diagnostic;
 pub mod anf;
 pub mod normalize;
+pub mod simple_opt;
 
 fn main() {
     println!("Hello, world!");
