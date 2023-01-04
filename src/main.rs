@@ -8,6 +8,7 @@ pub mod env_map;
 pub mod renamer;
 pub mod infer;
 pub mod diagnostic;
+pub mod anf;
 
 fn main() {
     println!("Hello, world!");
