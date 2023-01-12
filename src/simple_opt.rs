@@ -28,77 +28,76 @@ impl ConstFold {
                 let cont = Box::new(self.visit_expr(*cont));
                 MExpr::LetIn { decls, cont }
             }
-            MExpr::Stmt {
-                bind,
-                prim,
-                args,
-                cont,
-            } => {
-                let args: Vec<Atom> = args.into_iter().map(|arg| self.visit_atom(arg)).collect();
-                match prim {
-                    StmtPrim::IAdd => {
-                        if let (Some(z), Atom::Int(x), Atom::Int(y)) = (bind, args[0], args[1]) {
+            MExpr::Stmt { bind, stmt, cont } => {
+                let stmt = stmt
+                    .args_map(|arg| self.visit_atom(arg))
+                    .brchs_map(|brch| self.visit_expr(brch));
+
+                let stmt = match stmt {
+                    MStmt::IAdd { arg1, arg2 } => {
+                        if let (Some(z), Atom::Int(x), Atom::Int(y)) = (bind, arg1, arg2) {
                             self.map.insert(z, Atom::Int(x + y));
                             return self.visit_expr(*cont);
+                        } else {
+                            stmt
                         }
                     }
-                    StmtPrim::IMul => {
-                        if let (Some(z), Atom::Int(x), Atom::Int(y)) = (bind, args[0], args[1]) {
+                    MStmt::ISub { arg1, arg2 } => {
+                        if let (Some(z), Atom::Int(x), Atom::Int(y)) = (bind, arg1, arg2) {
+                            self.map.insert(z, Atom::Int(x - y));
+                            return self.visit_expr(*cont);
+                        } else {
+                            stmt
+                        }
+                    }
+                    MStmt::IMul { arg1, arg2 } => {
+                        if let (Some(z), Atom::Int(x), Atom::Int(y)) = (bind, arg1, arg2) {
                             self.map.insert(z, Atom::Int(x * y));
                             return self.visit_expr(*cont);
+                        } else {
+                            stmt
                         }
                     }
-                    StmtPrim::Move => {
-                        if let (Some(z), x) = (bind, args[0]) {
-                            self.map.insert(z, x);
+                    MStmt::Move { arg1 } => {
+                        if let Some(z) = bind {
+                            self.map.insert(z, arg1);
                             return self.visit_expr(*cont);
+                        } else {
+                            stmt
                         }
                     }
-                    // todo: other primitives
-                    _ => {
-                        // do nothing
-                    }
-                }
-                let cont = Box::new(self.visit_expr(*cont));
-                MExpr::Stmt {
-                    prim,
-                    args,
-                    bind,
-                    cont,
-                }
-            }
-            MExpr::Brch { prim, args, conts } => {
-                let args: Vec<Atom> = args.into_iter().map(|arg| self.visit_atom(arg)).collect();
-
-                match prim {
-                    BrchPrim::Ifte => {
-                        if let Atom::Bool(x) = args[0] {
-                            let [trbr, flbr]: [MExpr; 2] = conts.try_into().unwrap();
-                            if x {
-                                return self.visit_expr(trbr);
+                    MStmt::Alloc { .. } => stmt,
+                    MStmt::Load { .. } => stmt,
+                    MStmt::Store { .. } => stmt,
+                    MStmt::Offset { .. } => stmt,
+                    MStmt::Ifte { arg1, brch1, brch2 } => {
+                        if let Atom::Bool(p) = arg1 {
+                            let cont = self.visit_expr(*cont);
+                            if p {
+                                return brch1.concat(bind, cont);
                             } else {
-                                return self.visit_expr(flbr);
+                                return brch2.concat(bind, cont);
                             }
+                        } else {
+                            MStmt::Ifte { arg1, brch1, brch2 }
                         }
                     }
-                    BrchPrim::Switch => {
-                        if let Atom::Int(x) = args[0] {
-                            let cont = conts.into_iter().nth(x as usize).unwrap();
-                            return self.visit_expr(cont);
+                    MStmt::Switch { arg1, brchs } => {
+                        if let Atom::Int(x) = arg1 {
+                            let cont = self.visit_expr(*cont);
+                            return brchs
+                                .into_iter()
+                                .nth(x as usize)
+                                .unwrap()
+                                .concat(bind, cont);
+                        } else {
+                            MStmt::Switch { arg1, brchs }
                         }
                     }
-                    // todo: more branch reduction
-                    _ => {
-                        // do nothing
-                    }
-                }
+                };
 
-                let conts = conts
-                    .into_iter()
-                    .map(|cont| self.visit_expr(cont))
-                    .collect();
-
-                MExpr::Brch { prim, args, conts }
+                let cont = Box::new(self.visit_expr(*cont));
+                MExpr::Stmt { bind, stmt, cont }
             }
             MExpr::Call {
                 bind,
@@ -141,7 +140,7 @@ impl ConstFold {
     }
 
     fn visit_atom(&mut self, atom: Atom) -> Atom {
-        // substitute until constant or no binding
+        // substitute until it's constant or no binding
         let mut atom = atom;
         loop {
             if let Atom::Var(sym) = atom {
@@ -243,36 +242,21 @@ impl DeadElim {
                     MExpr::LetIn { decls, cont }
                 }
             }
-            MExpr::Stmt {
-                bind,
-                prim,
-                args,
-                cont,
-            } => {
+            MExpr::Stmt { bind, stmt, cont } => {
                 let cont = Box::new(self.visit_expr(*cont));
                 let used = if let Some(x) = bind {
                     self.free.remove(&x)
                 } else {
                     false
                 };
-                if !used && prim.is_pure() {
+                if !used && stmt.is_pure() {
                     return *cont;
                 }
-                let args: Vec<Atom> = args.into_iter().map(|arg| self.visit_atom(arg)).collect();
-                MExpr::Stmt {
-                    bind,
-                    prim,
-                    args,
-                    cont,
-                }
-            }
-            MExpr::Brch { prim, args, conts } => {
-                let conts = conts
-                    .into_iter()
-                    .map(|cont| self.visit_expr(cont))
-                    .collect();
-                let args: Vec<Atom> = args.into_iter().map(|arg| self.visit_atom(arg)).collect();
-                MExpr::Brch { prim, args, conts }
+                let stmt = stmt
+                    .brchs_map(|brch| self.visit_expr(brch))
+                    .args_map(|arg| self.visit_atom(arg));
+
+                MExpr::Stmt { bind, stmt, cont }
             }
             MExpr::Call {
                 bind,
@@ -340,53 +324,39 @@ impl DeadElim {
 #[test]
 #[allow(unused_imports)]
 fn const_fold_test() {
-    use crate::anf::BrchPrim::*;
-    use crate::anf::StmtPrim::*;
-    use crate::{atom, decls, expr, ident};
+    use crate::anf::anf_build::*;
 
-    let expr1 = expr! {
-        stmt x = IAdd, 1, 1;
-        stmt y = IAdd, x, 1;
-        stmt z = IAdd, y, 1;
-        retn z;
-    };
+    let expr1 = block(vec![
+        iadd("x", i(1), i(1)),
+        iadd("y", v("x"), i(1)),
+        iadd("z", v("y"), i(1)),
+        retn(v("z")),
+    ]);
     let expr1 = ConstFold::run(expr1);
-    let expr2 = expr! {
-        retn 4;
-    };
+    let expr2 = block(vec![retn(i(4))]);
     assert_eq!(expr1, expr2);
 
-    let expr1 = expr! {
-        stmt x = IAdd, 1, 1;
-        stmt y = Move, x;
-        call z = f (x, y);
-        retn z;
-    };
+    let expr1 = block(vec![
+        iadd("x", i(1), i(1)),
+        _move("y", v("x")),
+        call("z", "f", vec![v("x"), v("y")]),
+        retn(v("z")),
+    ]);
     let expr1 = ConstFold::run(expr1);
-    let expr2 = expr! {
-        call z = f (2, 2);
-        retn z;
-    };
+    let expr2 = block(vec![call("z", "f", vec![i(2), i(2)]), retn(v("z"))]);
     assert_eq!(expr1, expr2);
 }
 
 #[test]
-#[allow(unused_imports)]
 fn dead_elim_test() {
-    use crate::anf::BrchPrim::*;
-    use crate::anf::StmtPrim::*;
-    use crate::{atom, decls, expr, ident};
-
-    let expr1 = expr! {
-        stmt x = IAdd, 1, 1;
-        stmt y = IAdd, x, 1;
-        stmt z = IAdd, y, 1;
-        retn x;
-    };
+    use crate::anf::anf_build::*;
+    let expr1 = block(vec![
+        iadd("x", i(1), i(1)),
+        iadd("y", v("x"), i(1)),
+        iadd("z", v("y"), i(1)),
+        retn(v("x")),
+    ]);
     let expr1 = DeadElim::run(expr1);
-    let expr2 = expr! {
-        stmt x = IAdd, 1, 1;
-        retn x;
-    };
+    let expr2 = block(vec![iadd("x", i(1), i(1)), retn(v("x"))]);
     assert_eq!(expr1, expr2);
 }
