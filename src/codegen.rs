@@ -6,12 +6,14 @@ use crate::anf::*;
 use crate::intern::Unique;
 
 pub struct Codegen {
+    bind_vec: Vec<Option<Unique>>,
     text: String,
 }
 
 impl Codegen {
     pub fn new() -> Codegen {
         Codegen {
+            bind_vec: Vec::new(),
             text: String::new(),
         }
     }
@@ -43,194 +45,79 @@ impl Codegen {
             }
         }
     }
-    fn binop(
-        &mut self,
-        bind: &Option<Unique>,
-        args: &Vec<Atom>,
-        lhs: &str,
-        opr: &str,
-        rhs: &str,
-    ) -> Result {
-        if let [arg1, arg2] = &args[..] {
-            if let Some(x) = bind {
-                write!(
-                    self.text,
-                    "  void* {x} = (void*)(({lhs}){arg1} {opr} ({rhs}){arg2});\n"
-                )
-            } else {
-                write!(self.text, "  (void*)(({lhs}){arg1} {opr} ({rhs}){arg2});\n")
-            }
-        } else {
-            panic!("argument number doesn't match operator's arity!");
-        }
-    }
-
-    fn uniop(&mut self, bind: &Option<Unique>, args: &Vec<Atom>, opr: &str, rhs: &str) -> Result {
-        if let [arg1] = &args[..] {
-            if let Some(x) = bind {
-                write!(self.text, "  void* {x} = (void*)({opr} ({rhs}){arg1});\n")
-            } else {
-                write!(self.text, "  (void*)({opr} ({rhs}){arg1});\n")
-            }
-        } else {
-            panic!("argument number doesn't match operator's arity!");
-        }
-    }
-
-    fn jump_compare(
-        &mut self,
-        args: &Vec<Atom>,
-        conts: &Vec<MExpr>,
-        lhs: &str,
-        opr: &str,
-        rhs: &str,
-    ) -> Result {
-        if let ([arg1, arg2], [trbr, flbr]) = (&args[..], &conts[..]) {
-            write!(self.text, "  if({lhs}){arg1} {opr} ({rhs}){arg2}) {{\n")?;
-            self.visit_expr(trbr)?;
-            write!(self.text, "  }} else {{\n")?;
-            self.visit_expr(flbr)?;
-            write!(self.text, "  }}\n")
-        } else {
-            panic!("argument number doesn't match operator's arity!");
-        }
-    }
 
     fn visit_expr(&mut self, expr: &MExpr) -> Result {
         match expr {
             MExpr::LetIn { .. } => {
                 panic!("after closure conversion there shouldn't be any nested let-block");
             }
-            MExpr::Stmt {
-                bind,
-                prim,
-                args,
-                cont,
-            } => {
-                match prim {
-                    StmtPrim::IAdd => {
-                        self.binop(bind, args, "int64_t", "+", "int64_t")?;
+            MExpr::Stmt { bind, stmt, cont } if stmt.is_branch() => {
+                if let Some(ret_addr) = bind {
+                    write!(self.text, "    void* {ret_addr};\n")?;
+                }
+                self.bind_vec.push(*bind);
+                match stmt {
+                    MStmt::Ifte { arg1, brch1, brch2 } => {
+                        write!(self.text, "    if({arg1}) {{\n")?;
+                        self.visit_expr(brch1)?;
+                        write!(self.text, "    }} else {{\n")?;
+                        self.visit_expr(brch2)?;
+                        write!(self.text, "    }}\n")?;
                     }
-                    StmtPrim::ISub => {
-                        self.binop(bind, args, "int64_t", "-", "int64_t")?;
-                    }
-                    StmtPrim::IMul => {
-                        self.binop(bind, args, "int64_t", "*", "int64_t")?;
-                    }
-                    StmtPrim::IDiv => {
-                        self.binop(bind, args, "int64_t", "/", "int64_t")?;
-                    }
-                    StmtPrim::IRem => {
-                        self.binop(bind, args, "int64_t", "%", "int64_t")?;
-                    }
-                    StmtPrim::INeg => {
-                        self.uniop(bind, args, "-", "int64_t")?;
-                    }
-                    StmtPrim::RAdd => {
-                        self.binop(bind, args, "double", "+", "double")?;
-                    }
-                    StmtPrim::RSub => {
-                        self.binop(bind, args, "double", "-", "double")?;
-                    }
-                    StmtPrim::RMul => {
-                        self.binop(bind, args, "double", "*", "double")?;
-                    }
-                    StmtPrim::RDiv => {
-                        self.binop(bind, args, "double", "/", "double")?;
-                    }
-                    StmtPrim::BAnd => {
-                        self.binop(bind, args, "bool", "&&", "bool")?;
-                    }
-                    StmtPrim::BOr => {
-                        self.binop(bind, args, "bool", "||", "bool")?;
-                    }
-                    StmtPrim::BNot => {
-                        self.uniop(bind, args, "!", "bool")?;
-                    }
-                    StmtPrim::Move => {
-                        self.uniop(bind, args, "", "void*")?;
-                    }
-                    StmtPrim::Alloc => {
-                        if let [arg1] = &args[..] {
-                            if let Some(x) = bind {
-                                write!(
-                                    self.text,
-                                    "  void* {x} = malloc({arg1} * sizeof(void*));\n"
-                                )?;
-                            } else {
-                                write!(self.text, "  malloc({arg1} * sizeof(void*));\n")?;
-                            }
-                        } else {
-                            panic!("argument number doesn't match operator's arity!");
+                    MStmt::Switch { arg1, brchs } => {
+                        write!(self.text, "    switch({arg1}) {{\n")?;
+                        for (i, brch) in brchs.iter().enumerate() {
+                            write!(self.text, "    case {i}:\n")?;
+                            self.visit_expr(brch)?;
+                            write!(self.text, "    break;\n")?;
                         }
+                        write!(self.text, "    }}\n")?;
                     }
-                    StmtPrim::Load => {
-                        if let [arg1, arg2] = &args[..] {
-                            if let Some(x) = bind {
-                                write!(self.text, "  void* {x} = ((void**){arg1})[{arg2}];\n")?;
-                            } else {
-                                write!(self.text, "  ((void**){arg1})[{arg2}];\n")?;
-                            }
-                        } else {
-                            panic!("argument number doesn't match operator's arity!");
-                        }
-                    }
-                    StmtPrim::Store => {
-                        if let [arg1, arg2, arg3] = &args[..] {
-                            assert!(bind.is_none());
-                            write!(self.text, "  ((void**){arg1})[{arg2}] = (void*){arg3};\n")?;
-                        } else {
-                            panic!("argument number doesn't match operator's arity!");
-                        }
-                    }
-                    StmtPrim::Offset => {
-                        if let [arg1, arg2] = &args[..] {
-                            if let Some(x) = bind {
-                                write!(self.text, "  void* {x} = &((void**){arg1})[{arg2}];\n")?;
-                            } else {
-                                write!(self.text, "  &((void**){arg1})[{arg2}];\n")?;
-                            }
-                        } else {
-                            panic!("argument number doesn't match operator's arity!");
-                        }
+                    _ => {
+                        unreachable!()
                     }
                 }
+                self.bind_vec.pop();
                 self.visit_expr(cont)
             }
-            MExpr::Brch { prim, args, conts } => {
-                match prim {
-                    BrchPrim::Switch => {
-                        if let [arg1] = &args[..] {
-                            write!(self.text, "  switch({arg1}) {{\n")?;
-                            for (i, cont) in conts.iter().enumerate() {
-                                write!(self.text, "  case {i}:\n")?;
-                                self.visit_expr(cont)?;
-                                write!(self.text, "  break;\n")?;
-                            }
-                            write!(self.text, "  }}\n")
-                        } else {
-                            panic!("expected 1 arguments, found {}!", args.len());
-                        }
+            MExpr::Stmt { bind, stmt, cont } => {
+                if let Some(x) = bind {
+                    write!(self.text, "    void* {x} = (void*)(")?;
+                } else {
+                    write!(self.text, "    ")?;
+                }
+
+                match stmt {
+                    MStmt::IAdd { arg1, arg2 } => {
+                        write!(self.text, "(int64_t){arg1} + (int64_t){arg2}")?
                     }
-                    BrchPrim::Ifte => {
-                        if let ([arg1], [trbr, flbr]) = (&args[..], &conts[..]) {
-                            write!(self.text, "  if({arg1}) {{\n")?;
-                            self.visit_expr(trbr)?;
-                            write!(self.text, "  }} else {{\n")?;
-                            self.visit_expr(flbr)?;
-                            write!(self.text, "  }}\n")
-                        } else {
-                            panic!("expected 1 argument and 2 branches, found {} and {} correspondingly!", args.len(), conts.len());
-                        }
+                    MStmt::ISub { arg1, arg2 } => {
+                        write!(self.text, "(int64_t){arg1} - (int64_t){arg2}")?
                     }
-                    BrchPrim::JumpGr => self.jump_compare(args, conts, "int64_t", ">", "int64_t"),
-                    BrchPrim::JumpLs => self.jump_compare(args, conts, "int64_t", "<", "int64_t"),
-                    BrchPrim::JumpEq => self.jump_compare(args, conts, "int64_t", "==", "int64_t"),
-                    // todo: not only integer compare, but also real number compare
-                    BrchPrim::Halt => {
-                        write!(self.text, "exit(0)\n")
+                    MStmt::IMul { arg1, arg2 } => {
+                        write!(self.text, "(int64_t){arg1} * (int64_t){arg2}")?
+                    }
+                    MStmt::Move { arg1 } => write!(self.text, "{arg1}")?,
+                    MStmt::Alloc { size } => write!(self.text, "malloc({size} * sizeof(void*))")?,
+                    MStmt::Load { arg1, index } => write!(self.text, "((void**){arg1})[{index}]")?,
+                    MStmt::Store { arg1, index, arg2 } => {
+                        assert!(bind.is_none());
+                        write!(self.text, "((void**){arg1})[{index}] = (void*){arg2}")?
+                    }
+                    MStmt::Offset { arg1, index } => {
+                        write!(self.text, "&((void**){arg1})[{index}]")?
+                    }
+                    MStmt::Ifte { .. } | MStmt::Switch { .. } => {
+                        unreachable!()
                     }
                 }
+
+                if bind.is_some() {
+                    write!(self.text, ");\n")?;
+                } else {
+                    write!(self.text, ";\n")?;
+                }
+                self.visit_expr(cont)
             }
             MExpr::Call {
                 bind,
@@ -241,17 +128,26 @@ impl Codegen {
                 // temp is used for pointer type coercing
                 let temp = Unique::generate('f');
                 let pars = args.iter().map(|_| "void*").format(", ");
-                write!(self.text, "  void* (*{temp})({pars}) = {func};\n")?;
+                write!(self.text, "    void* (*{temp})({pars}) = {func};\n")?;
                 let args = args.iter().map(|arg| format!("(void*){arg}")).format(", ");
                 if let Some(x) = bind {
-                    write!(self.text, "  void* {x} = {temp}({args});\n")?;
+                    write!(self.text, "    void* {x} = {temp}({args});\n")?;
                 } else {
-                    write!(self.text, "  {temp}({args});\n")?;
+                    write!(self.text, "    {temp}({args});\n")?;
                 }
                 self.visit_expr(cont)
             }
             MExpr::Retn { atom } => {
-                write!(self.text, "  return {atom};\n")
+                match self.bind_vec.last() {
+                    Some(Some(ret_addr)) => {
+                        write!(self.text, "    {ret_addr} = {atom};\n")
+                    }
+                    Some(None) => Ok(()),
+                    None => {
+                        // toplevel
+                        write!(self.text, "    return {atom};\n")
+                    }
+                }
             }
         }
     }
@@ -266,7 +162,9 @@ impl Codegen {
         let MDecl { func, pars, body } = decl;
         let pars = pars.iter().map(|par| format!("void* {par}")).format(&", ");
         write!(self.text, "void* {func}({pars}) {{\n")?;
+        assert!(self.bind_vec.is_empty());
         self.visit_expr(body)?;
+        self.bind_vec.clear();
         write!(self.text, "}}\n")
     }
 }
@@ -284,18 +182,19 @@ reading and editing are not recommanded.
 */
 "#;
 
-pub static C_SYS_CHECK: &'static str = r#"  if(sizeof(void*) != 8) {
-    puts("check failed: 'void*' is not 64-bits!");
-    exit(1);
-  }
-  if(sizeof(int64_t) != 8) {
-    puts("check failed: 'int64_t' is not 64-bits!");
-    exit(1);
-  }
-  if(sizeof(double) != 8) {
-    puts("check failed: 'double' is not 64-bits!");
-    exit(1);
-  }
+pub static C_SYS_CHECK: &'static str = r#"
+    if(sizeof(void*) != 8) {
+        puts("check failed: 'void*' is not 64-bits!");
+        exit(1);
+    }
+    if(sizeof(int64_t) != 8) {
+        puts("check failed: 'int64_t' is not 64-bits!");
+        exit(1);
+    }
+    if(sizeof(double) != 8) {
+        puts("check failed: 'double' is not 64-bits!");
+        exit(1);
+    }
 "#;
 
 #[test]
@@ -326,25 +225,16 @@ f(1)(2)
 
 #[test]
 #[ignore]
-#[allow(unused_imports)]
 fn codegen_test() {
-    use crate::anf::BrchPrim::*;
-    use crate::anf::StmtPrim::*;
-    use crate::parser::*;
-    use crate::renamer::Renamer;
-    use crate::{atom, decls, expr, ident};
-
-    let expr1 = expr! {
-        letin [
-            fun f1 (x1,x2) => {
-                stmt x3 = IAdd, x1, x2;
-                retn x3;
-            }
-        ] {
-            call x7 = x6 (x5);
-            retn x7;
-        }
-    };
+    use crate::anf::anf_build::*;
+    let expr1 = letin_block(
+        vec![fun(
+            "f1",
+            vec!["x1", "x2"],
+            block(vec![iadd("x3", v("x1"), v("x2")), retn(v("x3"))]),
+        )],
+        vec![call("x7", "x6", vec![v("x5")]), retn(v("x7"))],
+    );
     let text1 = Codegen::run(&expr1);
     println!("{text1}");
 
