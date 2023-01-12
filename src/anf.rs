@@ -1,105 +1,7 @@
-use crate::ast::{Builtin, LitVal};
+use crate::ast::LitVal;
 use crate::intern::{InternStr, Unique};
 use std::collections::HashMap;
 use std::fmt::{self, Display};
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum StmtPrim {
-    // arithmetic operations
-    IAdd,
-    ISub,
-    IMul,
-    IDiv,
-    IRem,
-    INeg,
-    RAdd,
-    RSub,
-    RMul,
-    RDiv,
-    BAnd,
-    BOr,
-    BNot,
-    // transfer operation
-    Move,
-    // memory operations
-    Alloc,
-    Load,
-    Store,
-    Offset,
-}
-
-impl StmtPrim {
-    pub fn is_pure(&self) -> bool {
-        use StmtPrim::*;
-        match self {
-            IAdd | ISub | IMul | IDiv | IRem | INeg | RAdd | RSub | RMul | RDiv | BAnd | BOr
-            | BNot | Move | Offset => true,
-            _ => false,
-        }
-    }
-    pub fn arity(&self) -> usize {
-        use StmtPrim::*;
-        match self {
-            IAdd | ISub | IMul | IDiv | IRem => 2,
-            INeg => 1,
-            RAdd | RSub | RMul | RDiv => 2,
-            BAnd | BOr => 2,
-            BNot => 1,
-            Move => 1,
-            Alloc => 1,
-            Load => 2,
-            Store => 3,
-            Offset => 2,
-        }
-    }
-}
-
-impl From<Builtin> for StmtPrim {
-    fn from(prim: Builtin) -> Self {
-        match prim {
-            Builtin::IAdd => StmtPrim::IAdd,
-            Builtin::ISub => StmtPrim::ISub,
-            Builtin::IMul => StmtPrim::IMul,
-            Builtin::IDiv => StmtPrim::IDiv,
-            Builtin::IRem => StmtPrim::IRem,
-            Builtin::INeg => StmtPrim::INeg,
-            Builtin::RAdd => StmtPrim::RAdd,
-            Builtin::RSub => StmtPrim::RSub,
-            Builtin::RMul => StmtPrim::RMul,
-            Builtin::RDiv => StmtPrim::RDiv,
-            Builtin::BAnd => StmtPrim::BAnd,
-            Builtin::BOr => StmtPrim::BOr,
-            Builtin::BNot => StmtPrim::BNot,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum BrchPrim {
-    // switch branching
-    Switch,
-    // if-then-else branching
-    Ifte,
-    // compare-jump branching
-    JumpGr,
-    JumpLs,
-    JumpEq,
-    // Termination
-    Halt,
-}
-
-impl BrchPrim {
-    pub fn arity(&self) -> usize {
-        match self {
-            BrchPrim::Switch => 1,
-            BrchPrim::Ifte => 1,
-            BrchPrim::JumpGr => 2,
-            BrchPrim::JumpLs => 2,
-            BrchPrim::JumpEq => 2,
-            BrchPrim::Halt => 0,
-        }
-    }
-}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Atom {
@@ -184,6 +86,257 @@ impl Atom {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum MStmt {
+    IAdd {
+        arg1: Atom,
+        arg2: Atom,
+    },
+    ISub {
+        arg1: Atom,
+        arg2: Atom,
+    },
+    IMul {
+        arg1: Atom,
+        arg2: Atom,
+    },
+    Move {
+        arg1: Atom,
+    },
+    Alloc {
+        size: usize,
+    },
+    Load {
+        arg1: Atom,
+        index: usize,
+    },
+    Store {
+        arg1: Atom,
+        index: usize,
+        arg2: Atom,
+    },
+    Offset {
+        arg1: Atom,
+        index: usize,
+    },
+    Ifte {
+        arg1: Atom,
+        brch1: Box<MExpr>,
+        brch2: Box<MExpr>,
+    },
+    Switch {
+        arg1: Atom,
+        brchs: Vec<MExpr>,
+    },
+}
+
+impl MStmt {
+    pub fn is_pure(&self) -> bool {
+        match self {
+            MStmt::IAdd { .. } | MStmt::ISub { .. } | MStmt::IMul { .. } | MStmt::Move { .. } => {
+                true
+            }
+            MStmt::Alloc { .. }
+            | MStmt::Load { .. }
+            | MStmt::Store { .. }
+            | MStmt::Offset { .. }
+            | MStmt::Ifte { .. }
+            | MStmt::Switch { .. } => false,
+        }
+    }
+    pub fn is_branch(&self) -> bool {
+        match self {
+            MStmt::Ifte { .. } | MStmt::Switch { .. } => true,
+            _ => false,
+        }
+    }
+}
+
+impl<'a> MStmt {
+    pub fn args_map<F>(self, mut func: F) -> Self
+    where
+        F: FnMut(Atom) -> Atom,
+    {
+        match self {
+            MStmt::IAdd { arg1, arg2 } => {
+                let arg1 = func(arg1);
+                let arg2 = func(arg2);
+                MStmt::IAdd { arg1, arg2 }
+            }
+            MStmt::ISub { arg1, arg2 } => {
+                let arg1 = func(arg1);
+                let arg2 = func(arg2);
+                MStmt::ISub { arg1, arg2 }
+            }
+            MStmt::IMul { arg1, arg2 } => {
+                let arg1 = func(arg1);
+                let arg2 = func(arg2);
+                MStmt::IMul { arg1, arg2 }
+            }
+            MStmt::Move { arg1 } => {
+                let arg1 = func(arg1);
+                MStmt::Move { arg1 }
+            }
+            MStmt::Alloc { size } => MStmt::Alloc { size },
+            MStmt::Load { arg1, index } => {
+                let arg1 = func(arg1);
+                MStmt::Load { arg1, index }
+            }
+            MStmt::Store { arg1, index, arg2 } => {
+                let arg1 = func(arg1);
+                let arg2 = func(arg2);
+                MStmt::Store { arg1, index, arg2 }
+            }
+            MStmt::Offset { arg1, index } => {
+                let arg1 = func(arg1);
+                MStmt::Offset { arg1, index }
+            }
+            MStmt::Ifte { arg1, brch1, brch2 } => {
+                let arg1 = func(arg1);
+                MStmt::Ifte { arg1, brch1, brch2 }
+            }
+            MStmt::Switch { arg1, brchs } => {
+                let arg1 = func(arg1);
+                MStmt::Switch { arg1, brchs }
+            }
+        }
+    }
+
+    pub fn brchs_map<F>(self, mut func: F) -> Self
+    where
+        F: FnMut(MExpr) -> MExpr,
+    {
+        match self {
+            MStmt::Ifte { arg1, brch1, brch2 } => {
+                let brch1 = Box::new(func(*brch1));
+                let brch2 = Box::new(func(*brch2));
+                MStmt::Ifte { arg1, brch1, brch2 }
+            }
+            MStmt::Switch { arg1, brchs } => {
+                let brchs = brchs.into_iter().map(|brch| func(brch)).collect();
+                MStmt::Switch { arg1, brchs }
+            }
+            _ => self,
+        }
+    }
+
+    pub fn args_for_each<F>(&self, mut func: F)
+    where
+        F: FnMut(&Atom),
+    {
+        match self {
+            MStmt::IAdd { arg1, arg2 } => {
+                func(arg1);
+                func(arg2);
+            }
+            MStmt::ISub { arg1, arg2 } => {
+                func(arg1);
+                func(arg2);
+            }
+            MStmt::IMul { arg1, arg2 } => {
+                func(arg1);
+                func(arg2);
+            }
+            MStmt::Move { arg1 } => {
+                func(arg1);
+            }
+            MStmt::Alloc { .. } => {}
+            MStmt::Load { arg1, .. } => {
+                func(arg1);
+            }
+            MStmt::Store { arg1, arg2, .. } => {
+                func(arg1);
+                func(arg2);
+            }
+            MStmt::Offset { arg1, .. } => {
+                func(arg1);
+            }
+            MStmt::Ifte { arg1, .. } => {
+                func(arg1);
+            }
+            MStmt::Switch { arg1, .. } => {
+                func(arg1);
+            }
+        }
+    }
+
+    pub fn brchs_for_each<F>(&self, mut func: F)
+    where
+        F: FnMut(&MExpr),
+    {
+        match self {
+            MStmt::Ifte { brch1, brch2, .. } => {
+                func(brch1);
+                func(brch2);
+            }
+            MStmt::Switch { brchs, .. } => {
+                for brch in brchs {
+                    func(brch);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn args_mut_for_each<F>(&mut self, mut func: F)
+    where
+        F: FnMut(&mut Atom),
+    {
+        match self {
+            MStmt::IAdd { arg1, arg2 } => {
+                func(arg1);
+                func(arg2);
+            }
+            MStmt::ISub { arg1, arg2 } => {
+                func(arg1);
+                func(arg2);
+            }
+            MStmt::IMul { arg1, arg2 } => {
+                func(arg1);
+                func(arg2);
+            }
+            MStmt::Move { arg1 } => {
+                func(arg1);
+            }
+            MStmt::Alloc { .. } => {}
+            MStmt::Load { arg1, .. } => {
+                func(arg1);
+            }
+            MStmt::Store { arg1, arg2, .. } => {
+                func(arg1);
+                func(arg2);
+            }
+            MStmt::Offset { arg1, .. } => {
+                func(arg1);
+            }
+            MStmt::Ifte { arg1, .. } => {
+                func(arg1);
+            }
+            MStmt::Switch { arg1, .. } => {
+                func(arg1);
+            }
+        }
+    }
+
+    pub fn brchs_mut_for_each<F>(&mut self, mut func: F)
+    where
+        F: FnMut(&mut MExpr),
+    {
+        match self {
+            MStmt::Ifte { brch1, brch2, .. } => {
+                func(brch1);
+                func(brch2);
+            }
+            MStmt::Switch { brchs, .. } => {
+                for brch in brchs {
+                    func(brch);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum CallFunc {
     Intern(Unique),
@@ -198,14 +351,8 @@ pub enum MExpr {
     },
     Stmt {
         bind: Option<Unique>,
-        prim: StmtPrim,
-        args: Vec<Atom>,
+        stmt: MStmt,
         cont: Box<MExpr>,
-    },
-    Brch {
-        prim: BrchPrim,
-        args: Vec<Atom>,
-        conts: Vec<MExpr>,
     },
     Call {
         bind: Option<Unique>,
@@ -219,13 +366,17 @@ pub enum MExpr {
 }
 
 impl MExpr {
+    pub fn is_retn(&self) -> bool {
+        if let MExpr::Retn { .. } = self {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_tail_call(&self) -> bool {
         if let MExpr::Call { cont, .. } = self {
-            if let MExpr::Retn { .. } = **cont {
-                true
-            } else {
-                false
-            }
+            cont.is_retn()
         } else {
             false
         }
@@ -240,6 +391,44 @@ impl MExpr {
             cont: Box::new(MExpr::Retn { atom: Atom::Var(r) }),
         }
     }
+
+    pub fn concat(self, bind: Option<Unique>, other: MExpr) -> MExpr {
+        match self {
+            MExpr::LetIn { decls, cont } => {
+                let cont = Box::new(cont.concat(bind, other));
+                MExpr::LetIn { decls, cont }
+            }
+            MExpr::Stmt { bind, stmt, cont } => {
+                let cont = Box::new(cont.concat(bind, other));
+                MExpr::Stmt { bind, stmt, cont }
+            }
+            MExpr::Call {
+                bind,
+                func,
+                args,
+                cont,
+            } => {
+                let cont = Box::new(cont.concat(bind, other));
+                MExpr::Call {
+                    bind,
+                    func,
+                    args,
+                    cont,
+                }
+            }
+            MExpr::Retn { atom } => {
+                if bind.is_some() {
+                    MExpr::Stmt {
+                        bind,
+                        stmt: MStmt::Move { arg1: atom },
+                        cont: Box::new(other),
+                    }
+                } else {
+                    other
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -247,44 +436,6 @@ pub struct MDecl {
     pub func: Unique,
     pub pars: Vec<Unique>,
     pub body: MExpr,
-}
-
-impl Display for StmtPrim {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            StmtPrim::IAdd => write!(f, "iadd"),
-            StmtPrim::ISub => write!(f, "isub"),
-            StmtPrim::IMul => write!(f, "imul"),
-            StmtPrim::IDiv => write!(f, "idiv"),
-            StmtPrim::IRem => write!(f, "irem"),
-            StmtPrim::INeg => write!(f, "ineg"),
-            StmtPrim::RAdd => write!(f, "radd"),
-            StmtPrim::RSub => write!(f, "rsub"),
-            StmtPrim::RMul => write!(f, "rmul"),
-            StmtPrim::RDiv => write!(f, "rdiv"),
-            StmtPrim::BAnd => write!(f, "band"),
-            StmtPrim::BOr => write!(f, "bor"),
-            StmtPrim::BNot => write!(f, "bnot"),
-            StmtPrim::Move => write!(f, "move"),
-            StmtPrim::Alloc => write!(f, "alloc"),
-            StmtPrim::Load => write!(f, "load"),
-            StmtPrim::Store => write!(f, "store"),
-            StmtPrim::Offset => write!(f, "offset"),
-        }
-    }
-}
-
-impl Display for BrchPrim {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            BrchPrim::Switch => write!(f, "switch"),
-            BrchPrim::Ifte => write!(f, "ifte"),
-            BrchPrim::JumpGr => write!(f, "jumpgr"),
-            BrchPrim::JumpLs => write!(f, "jumpls"),
-            BrchPrim::JumpEq => write!(f, "jumpeq"),
-            BrchPrim::Halt => write!(f, "halt"),
-        }
-    }
 }
 
 impl Display for Atom {
@@ -319,57 +470,40 @@ impl AlphaEquiv {
         }
     }
 
-    fn eq_ident(&mut self, ident1: &Unique, ident2: &Unique) -> Option<()> {
+    fn eq_ident(&mut self, ident1: &Unique, ident2: &Unique) -> bool {
         // println!("unify {ident1} and {ident2}");
         if let Some(bind) = self.map.get(&ident1) {
-            if bind == ident2 {
-                Some(())
-            } else {
-                None
-            }
+            bind == ident2
         } else {
             self.map.insert(*ident1, *ident2);
-            Some(())
+            true
         }
     }
 
-    fn eq_atom(&mut self, atom1: &Atom, atom2: &Atom) -> Option<()> {
+    fn eq_atom(&mut self, atom1: &Atom, atom2: &Atom) -> bool {
         match (atom1, atom2) {
             (Atom::Var(var1), Atom::Var(var2)) => self.eq_ident(var1, var2),
-            (atom1, atom2) => {
-                if atom1 == atom2 {
-                    Some(())
-                } else {
-                    None
-                }
-            }
+            (atom1, atom2) => atom1 == atom2,
         }
     }
 
-    fn eq_bind(&mut self, bind1: &Option<Unique>, bind2: &Option<Unique>) -> Option<()> {
+    fn eq_bind(&mut self, bind1: &Option<Unique>, bind2: &Option<Unique>) -> bool {
         match (bind1, bind2) {
             (Some(bind1), Some(bind2)) => self.eq_ident(bind1, bind2),
-            (Some(_), None) | (None, Some(_)) => None,
-            (None, None) => Some(()),
+            (None, None) => true,
+            (_, _) => false,
         }
     }
 
-    fn eq_call_func(&mut self, func1: &CallFunc, func2: &CallFunc) -> Option<()> {
+    fn eq_call_func(&mut self, func1: &CallFunc, func2: &CallFunc) -> bool {
         match (func1, func2) {
             (CallFunc::Intern(ident1), CallFunc::Intern(ident2)) => self.eq_ident(ident1, ident2),
-            (CallFunc::Intern(_), CallFunc::Extern(_))
-            | (CallFunc::Extern(_), CallFunc::Intern(_)) => None,
-            (CallFunc::Extern(s1), CallFunc::Extern(s2)) => {
-                if s1 == s2 {
-                    Some(())
-                } else {
-                    None
-                }
-            }
+            (CallFunc::Extern(s1), CallFunc::Extern(s2)) => s1 == s2,
+            _ => false,
         }
     }
 
-    fn eq_decl(&mut self, decl1: &MDecl, decl2: &MDecl) -> Option<()> {
+    fn eq_decl(&mut self, decl1: &MDecl, decl2: &MDecl) -> bool {
         let MDecl {
             func: func1,
             pars: pars1,
@@ -381,17 +515,16 @@ impl AlphaEquiv {
             body: body2,
         } = decl2;
 
-        self.eq_ident(func1, func2)?;
-        if pars1.len() != pars2.len() {
-            return None;
-        }
-        for (par1, par2) in pars1.iter().zip(pars2.iter()) {
-            self.eq_ident(par1, par2)?;
-        }
-        self.eq_expr(body1, body2)
+        self.eq_ident(func1, func2)
+            && pars1.len() == pars2.len()
+            && pars1
+                .iter()
+                .zip(pars2.iter())
+                .all(|(par1, par2)| self.eq_ident(par1, par2))
+            && self.eq_expr(body1, body2)
     }
 
-    fn eq_expr(&mut self, expr1: &MExpr, expr2: &MExpr) -> Option<()> {
+    fn eq_expr(&mut self, expr1: &MExpr, expr2: &MExpr) -> bool {
         match (expr1, expr2) {
             (
                 MExpr::LetIn {
@@ -403,68 +536,134 @@ impl AlphaEquiv {
                     cont: cont2,
                 },
             ) => {
-                if decls1.len() != decls2.len() {
-                    return None;
-                }
-                for (decl1, decl2) in decls1.iter().zip(decls2.iter()) {
-                    self.eq_decl(decl1, decl2)?;
-                }
-                self.eq_expr(cont1, cont2)
+                decls1.len() == decls2.len()
+                    && decls1
+                        .iter()
+                        .zip(decls2.iter())
+                        .all(|(decl1, decl2)| self.eq_decl(decl1, decl2))
+                    && self.eq_expr(cont1, cont2)
             }
             (
                 MExpr::Stmt {
                     bind: bind1,
-                    prim: prim1,
-                    args: args1,
+                    stmt: stmt1,
                     cont: cont1,
                 },
                 MExpr::Stmt {
                     bind: bind2,
-                    prim: prim2,
-                    args: args2,
+                    stmt: stmt2,
                     cont: cont2,
                 },
             ) => {
-                self.eq_bind(bind1, bind2)?;
-                if prim1 != prim2 {
-                    return None;
-                }
-                if args1.len() != args2.len() {
-                    return None;
-                }
-                for (arg1, arg2) in args1.iter().zip(args2.iter()) {
-                    self.eq_atom(arg1, arg2)?;
-                }
-                self.eq_expr(cont1, cont2)
-            }
-            (
-                MExpr::Brch {
-                    prim: prim1,
-                    args: args1,
-                    conts: conts1,
-                },
-                MExpr::Brch {
-                    prim: prim2,
-                    args: args2,
-                    conts: conts2,
-                },
-            ) => {
-                if prim1 != prim2 {
-                    return None;
-                }
-                if args1.len() != args2.len() {
-                    return None;
-                }
-                for (arg1, arg2) in args1.iter().zip(args2.iter()) {
-                    self.eq_atom(arg1, arg2)?;
-                }
-                if conts1.len() != conts2.len() {
-                    return None;
-                }
-                for (cont1, cont2) in conts1.iter().zip(conts2.iter()) {
-                    self.eq_expr(cont1, cont2)?;
-                }
-                Some(())
+                self.eq_bind(bind1, bind2)
+                    && match (stmt1, stmt2) {
+                        (
+                            MStmt::IAdd {
+                                arg1: arg11,
+                                arg2: arg12,
+                            },
+                            MStmt::IAdd {
+                                arg1: arg21,
+                                arg2: arg22,
+                            },
+                        )
+                        | (
+                            MStmt::ISub {
+                                arg1: arg11,
+                                arg2: arg12,
+                            },
+                            MStmt::ISub {
+                                arg1: arg21,
+                                arg2: arg22,
+                            },
+                        )
+                        | (
+                            MStmt::IMul {
+                                arg1: arg11,
+                                arg2: arg12,
+                            },
+                            MStmt::IMul {
+                                arg1: arg21,
+                                arg2: arg22,
+                            },
+                        ) => self.eq_atom(arg11, arg21) && self.eq_atom(arg12, arg22),
+                        (MStmt::Move { arg1: arg11 }, MStmt::Move { arg1: arg21 }) => {
+                            self.eq_atom(arg11, arg21)
+                        }
+                        (MStmt::Alloc { size: size1 }, MStmt::Alloc { size: size2 }) => {
+                            size1 == size2
+                        }
+                        (
+                            MStmt::Load {
+                                arg1: arg11,
+                                index: index1,
+                            },
+                            MStmt::Load {
+                                arg1: arg21,
+                                index: index2,
+                            },
+                        ) => self.eq_atom(arg11, arg21) && index1 == index2,
+                        (
+                            MStmt::Store {
+                                arg1: arg11,
+                                index: index1,
+                                arg2: arg12,
+                            },
+                            MStmt::Store {
+                                arg1: arg21,
+                                index: index2,
+                                arg2: arg22,
+                            },
+                        ) => {
+                            self.eq_atom(arg11, arg21)
+                                && index1 == index2
+                                && self.eq_atom(arg12, arg22)
+                        }
+                        (
+                            MStmt::Offset {
+                                arg1: arg11,
+                                index: index1,
+                            },
+                            MStmt::Offset {
+                                arg1: arg21,
+                                index: index2,
+                            },
+                        ) => self.eq_atom(arg11, arg21) && index1 == index2,
+                        (
+                            MStmt::Ifte {
+                                arg1: arg11,
+                                brch1: brch11,
+                                brch2: brch12,
+                            },
+                            MStmt::Ifte {
+                                arg1: arg21,
+                                brch1: brch21,
+                                brch2: brch22,
+                            },
+                        ) => {
+                            self.eq_atom(arg11, arg21)
+                                && self.eq_expr(brch11, brch12)
+                                && self.eq_expr(brch21, brch22)
+                        }
+                        (
+                            MStmt::Switch {
+                                arg1: arg11,
+                                brchs: brchs1,
+                            },
+                            MStmt::Switch {
+                                arg1: arg21,
+                                brchs: brchs2,
+                            },
+                        ) => {
+                            self.eq_atom(arg11, arg21)
+                                && brchs1
+                                    .iter()
+                                    .zip(brchs2.iter())
+                                    .all(|(brch1, brch2)| self.eq_expr(brch1, brch2))
+                        }
+                        (_, _) => false,
+                    }
+                    && self.eq_expr(cont1, cont2)
             }
             (
                 MExpr::Call {
@@ -480,21 +679,19 @@ impl AlphaEquiv {
                     cont: cont2,
                 },
             ) => {
-                self.eq_bind(bind1, bind2)?;
-                self.eq_call_func(func1, func2)?;
-                if args1.len() != args2.len() {
-                    return None;
-                }
-                for (arg1, arg2) in args1.iter().zip(args2.iter()) {
-                    self.eq_atom(arg1, arg2)?;
-                }
-                self.eq_expr(cont1, cont2)
+                self.eq_bind(bind1, bind2)
+                    && self.eq_call_func(func1, func2)
+                    && args1.len() == args2.len()
+                    && args1
+                        .iter()
+                        .zip(args2.iter())
+                        .all(|(arg1, arg2)| self.eq_atom(arg1, arg2))
+                    && self.eq_expr(cont1, cont2)
             }
-
             (MExpr::Retn { atom: atom1 }, MExpr::Retn { atom: atom2 }) => {
                 self.eq_atom(atom1, atom2)
             }
-            (_, _) => None,
+            (_, _) => false,
         }
     }
 }
@@ -503,7 +700,7 @@ impl PartialEq for MExpr {
     fn eq(&self, other: &Self) -> bool {
         // use alpha-equivalence instead of identical comparison
         let mut pass = AlphaEquiv::new();
-        pass.eq_expr(self, other).is_some()
+        pass.eq_expr(self, other)
     }
 }
 
@@ -511,158 +708,239 @@ impl PartialEq for MDecl {
     fn eq(&self, other: &Self) -> bool {
         // use alpha-equivalence instead of identical comparison
         let mut pass = AlphaEquiv::new();
-        pass.eq_decl(self, other).is_some()
+        pass.eq_decl(self, other)
     }
 }
 
-#[macro_export]
-macro_rules! ident {
-    ($var:ident) => {
-        crate::intern::intern(stringify!($var)).as_dummy()
-    };
-}
-
-#[macro_export]
-macro_rules! atom {
-    ($lit:literal) => {
-        $lit.into()
-    };
-    ($var:ident) => {
-        crate::intern::intern(stringify!($var)).as_dummy().into()
-    };
-}
-
-#[macro_export]
-macro_rules! decls {
-    ($(fun $func:ident ( $($args:ident),* ) => { $($body:tt)+ });+) => {
-        vec![$(
-            MDecl {
-                func: ident!($func),
-                pars: vec![$(ident!($args),)*],
-                body: expr!($($body)+),
-            },
-        )+]
-    };
-}
-
-#[macro_export]
-macro_rules! expr {
-    (retn $atom:tt;) => {
-        MExpr::Retn {
-            atom: atom!($atom)
+pub mod anf_build {
+    use super::*;
+    use crate::intern::intern;
+    pub fn i(x: i64) -> Atom {
+        Atom::Int(x)
+    }
+    pub fn r(x: f64) -> Atom {
+        Atom::Real(x)
+    }
+    pub fn b(x: bool) -> Atom {
+        Atom::Bool(x)
+    }
+    pub fn c(x: char) -> Atom {
+        Atom::Char(x)
+    }
+    pub fn v(x: &str) -> Atom {
+        Atom::Var(intern(x).as_dummy())
+    }
+    pub fn u(x: &str) -> Unique {
+        intern(x).as_dummy()
+    }
+    pub fn fun(func: &str, pars: Vec<&str>, body: MExpr) -> MDecl {
+        MDecl {
+            func: u(func),
+            pars: pars.into_iter().map(|par| u(par)).collect(),
+            body,
         }
-    };
-    (stmt $bind:ident = $prim:expr, $($args:tt),+ ; $($rest:tt)*) => {
-        {
-            let args_vec = vec![$(atom!($args),)*];
-            assert_eq!(args_vec.len(), $prim.arity());
-            MExpr::Stmt {
-                bind: Some(ident!($bind)),
-                prim: $prim,
-                args: args_vec,
-                cont: Box::new(expr!($($rest)*)),
-            }
-        }
-    };
-    (stmt $prim:expr, $($args:tt),+ ; $($rest:tt)*) => {
-        {
-            let args_vec = vec![$(atom!($args),)*];
-            assert_eq!(args_vec.len(), $prim.arity());
-            MExpr::Stmt {
-                bind: None,
-                prim: $prim,
-                args: args_vec,
-                cont: Box::new(expr!($($rest)*)),
-            }
-        }
-    };
-    (brch $prim:expr, $($args:tt),+ begin $({ $($rest:tt)* });* end) => {
-        {
-            let args_vec = vec![$(atom!($args),)*];
-            assert_eq!(args_vec.len(), $prim.arity());
-            MExpr::Brch {
-                prim: $prim,
-                args: args_vec,
-                conts: vec![$(expr!($($rest)*)),*]
-            }
-        }
-    };
-    (call $bind:ident = $func:ident ( $($args:tt),+ ) ; $($rest:tt)*) => {
-        {
-            let args_vec = vec![$(atom!($args),)*];
-            MExpr::Call {
-                bind: Some(ident!($bind)),
-                func: CallFunc::Intern(ident!($func)),
-                args: args_vec,
-                cont: Box::new(expr!($($rest)*)),
-            }
-        }
-    };
-    (call $func:ident ( $($args:tt),+ ) ; $($rest:tt)*) => {
-        {
-            let args_vec = vec![$(atom!($args),)*];
-            MExpr::Call {
-                bind: None,
-                func: CallFunc::Intern(ident!($func)),
-                args: args_vec,
-                cont: Box::new(expr!($($rest)*)),
-            }
-        }
-    };
-    (letin [ $($decls:tt)* ] { $($rest:tt)* } ) => {
+    }
+    pub fn block(vec: Vec<MExpr>) -> MExpr {
+        vec.into_iter()
+            .rev()
+            .reduce(|e1, e2| match e2 {
+                MExpr::LetIn { decls, cont } => {
+                    assert!(cont.is_retn());
+                    MExpr::LetIn {
+                        decls,
+                        cont: Box::new(e1),
+                    }
+                }
+                MExpr::Stmt { bind, stmt, cont } => {
+                    assert!(cont.is_retn());
+                    MExpr::Stmt {
+                        bind,
+                        stmt,
+                        cont: Box::new(e1),
+                    }
+                }
+                MExpr::Call {
+                    bind,
+                    func,
+                    args,
+                    cont,
+                } => {
+                    assert!(cont.is_retn());
+                    MExpr::Call {
+                        bind,
+                        func,
+                        args,
+                        cont: Box::new(e1),
+                    }
+                }
+                MExpr::Retn { atom } => MExpr::Retn { atom },
+            })
+            .unwrap()
+    }
+    pub fn letin_block(decls: Vec<MDecl>, vec: Vec<MExpr>) -> MExpr {
         MExpr::LetIn {
-            decls: decls!($($decls)*),
-            cont: Box::new(expr!($($rest)*)),
+            decls,
+            cont: Box::new(block(vec)),
         }
+    }
+    pub fn iadd(bind: &str, arg1: Atom, arg2: Atom) -> MExpr {
+        MExpr::Stmt {
+            bind: if bind == "_" { None } else { Some(u(bind)) },
+            stmt: MStmt::IAdd { arg1, arg2 },
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u(bind)),
+            }),
+        }
+    }
+    pub fn isub(bind: &str, arg1: Atom, arg2: Atom) -> MExpr {
+        MExpr::Stmt {
+            bind: if bind == "_" { None } else { Some(u(bind)) },
+            stmt: MStmt::ISub { arg1, arg2 },
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u(bind)),
+            }),
+        }
+    }
+    pub fn imul(bind: &str, arg1: Atom, arg2: Atom) -> MExpr {
+        MExpr::Stmt {
+            bind: if bind == "_" { None } else { Some(u(bind)) },
+            stmt: MStmt::IMul { arg1, arg2 },
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u(bind)),
+            }),
+        }
+    }
+    // well, `move` is rust keyword!
+    pub fn _move(bind: &str, arg1: Atom) -> MExpr {
+        MExpr::Stmt {
+            bind: if bind == "_" { None } else { Some(u(bind)) },
+            stmt: MStmt::Move { arg1 },
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u(bind)),
+            }),
+        }
+    }
+    pub fn alloc(bind: &str, size: usize) -> MExpr {
+        MExpr::Stmt {
+            bind: if bind == "_" { None } else { Some(u(bind)) },
+            stmt: MStmt::Alloc { size },
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u(bind)),
+            }),
+        }
+    }
+    pub fn load(bind: &str, arg1: Atom, index: usize) -> MExpr {
+        MExpr::Stmt {
+            bind: if bind == "_" { None } else { Some(u(bind)) },
+            stmt: MStmt::Load { arg1, index },
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u(bind)),
+            }),
+        }
+    }
+    pub fn store(arg1: Atom, index: usize, arg2: Atom) -> MExpr {
+        MExpr::Stmt {
+            bind: None,
+            stmt: MStmt::Store { arg1, index, arg2 },
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u("_")),
+            }),
+        }
+    }
+    pub fn offset(bind: &str, arg1: Atom, index: usize) -> MExpr {
+        MExpr::Stmt {
+            bind: if bind == "_" { None } else { Some(u(bind)) },
+            stmt: MStmt::Offset { arg1, index },
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u(bind)),
+            }),
+        }
+    }
+    pub fn ifte(bind: &str, arg1: Atom, brch1: MExpr, brch2: MExpr) -> MExpr {
+        MExpr::Stmt {
+            bind: if bind == "_" { None } else { Some(u(bind)) },
+            stmt: MStmt::Ifte {
+                arg1,
+                brch1: Box::new(brch1),
+                brch2: Box::new(brch2),
+            },
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u(bind)),
+            }),
+        }
+    }
+    pub fn switch(bind: &str, arg1: Atom, brchs: Vec<MExpr>) -> MExpr {
+        MExpr::Stmt {
+            bind: if bind == "_" { None } else { Some(u(bind)) },
+            stmt: MStmt::Switch { arg1, brchs },
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u(bind)),
+            }),
+        }
+    }
+    pub fn call(bind: &str, func: &str, args: Vec<Atom>) -> MExpr {
+        MExpr::Call {
+            bind: if bind == "_" { None } else { Some(u(bind)) },
+            func: CallFunc::Intern(u(func)),
+            args,
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u(bind)),
+            }),
+        }
+    }
+    pub fn call_ext(bind: &str, func: &str, args: Vec<Atom>) -> MExpr {
+        MExpr::Call {
+            bind: if bind == "_" { None } else { Some(u(bind)) },
+            func: CallFunc::Extern(intern(func)),
+            args,
+            cont: Box::new(MExpr::Retn {
+                atom: Atom::Var(u(bind)),
+            }),
+        }
+    }
+    pub fn retn(atom: Atom) -> MExpr {
+        MExpr::Retn { atom }
     }
 }
 
 #[test]
 #[ignore]
-fn anf_macro_test() {
-    use BrchPrim::*;
-    use StmtPrim::*;
-
-    let expr = expr! {
-        letin [
-            fun f (x, y) => {
-                brch JumpGr, x, y begin {
-                    retn x;
-                }; {
-                    retn y;
-                } end
-            }
-        ] {
-            stmt a = IAdd, 1, 2;
-            stmt b = IMul, 3, 4;
-            call res = f (a, b);
-            retn res;
-        }
-    };
+fn anf_build_test() {
+    use self::anf_build::*;
+    let expr = block(vec![
+        iadd("a", i(42), i(1)),
+        iadd("b", v("a"), v("a")),
+        ifte(
+            "c",
+            v("a"),
+            block(vec![iadd("c", v("a"), v("a"))]),
+            retn(v("a")),
+        ),
+        retn(v("c")),
+    ]);
     println!("{expr}")
 }
 
 #[test]
 fn alpha_equiv_test() {
-    use StmtPrim::*;
+    use self::anf_build::*;
+    let expr1 = block(vec![
+        iadd("x", i(1), i(2)),
+        imul("y", v("x"), v("x")),
+        retn(v("y")),
+    ]);
 
-    let expr1 = expr! {
-        stmt x = IAdd, 1, 2;
-        stmt y = IMul, x, x;
-        retn y;
-    };
+    let expr2 = block(vec![
+        iadd("a", i(1), i(2)),
+        imul("b", v("a"), v("a")),
+        retn(v("b")),
+    ]);
 
-    let expr2 = expr! {
-        stmt a = IAdd, 1, 2;
-        stmt b = IMul, a, a;
-        retn b;
-    };
-
-    let expr3 = expr! {
-        stmt a = IAdd, 1, 2;
-        stmt b = IMul, a, a;
-        retn a;
-    };
+    let expr3 = block(vec![
+        iadd("a", i(1), i(2)),
+        imul("b", v("a"), v("a")),
+        retn(v("a")),
+    ]);
 
     assert_eq!(expr1, expr2);
     assert_ne!(expr1, expr3);

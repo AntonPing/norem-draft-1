@@ -255,6 +255,47 @@ impl<Ident: Display> Display for Type<Ident> {
     }
 }
 
+impl Display for MStmt {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            MStmt::IAdd { arg1, arg2 } => {
+                write!(f, "iadd({arg1}, {arg2})")
+            }
+            MStmt::ISub { arg1, arg2 } => {
+                write!(f, "isub({arg1}, {arg2})")
+            }
+            MStmt::IMul { arg1, arg2 } => {
+                write!(f, "imul({arg1}, {arg2})")
+            }
+            MStmt::Move { arg1 } => {
+                write!(f, "move({arg1})")
+            }
+            MStmt::Alloc { size } => {
+                write!(f, "alloc({size})")
+            }
+            MStmt::Load { arg1, index } => {
+                write!(f, "load({arg1}[{index}])")
+            }
+            MStmt::Store { arg1, index, arg2 } => {
+                write!(f, "store({arg1}[{index}],{arg2})")
+            }
+            MStmt::Offset { arg1, index } => {
+                write!(f, "offset({arg1}[{index}])")
+            }
+            MStmt::Ifte { arg1, brch1, brch2 } => {
+                write!(f, "if({arg1}) then{INDT}{NWLN}{brch1}{DEDT}{NWLN}else{INDT}{NWLN}{brch2}{DEDT}{NWLN}")
+            }
+            MStmt::Switch { arg1, brchs } => {
+                write!(f, "swith({arg1}) {{")?;
+                for (i, brch) in brchs.iter().enumerate() {
+                    write!(f, "{INDT}{NWLN}case {i}: {brch}{DEDT}{NWLN}")?;
+                }
+                write!(f, "}}")
+            }
+        }
+    }
+}
+
 impl Display for MExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -265,26 +306,12 @@ impl Display for MExpr {
                 }
                 write!(f, "{DEDT}{NWLN}in{INDT}{NWLN}{cont}{DEDT}{NWLN}end")
             }
-            MExpr::Stmt {
-                bind,
-                prim,
-                args,
-                cont,
-            } => {
-                let args = args.iter().format(&", ");
+            MExpr::Stmt { bind, stmt, cont } => {
                 if let Some(x) = bind {
-                    write!(f, "let {x} = {prim}({args});{NWLN}{cont}")
+                    write!(f, "let {x} = {stmt};{NWLN}{cont}")
                 } else {
-                    write!(f, "{prim}({args});{NWLN}{cont}")
+                    write!(f, "{stmt};{NWLN}{cont}")
                 }
-            }
-            MExpr::Brch { prim, args, conts } => {
-                let args = args.iter().format(&", ");
-                write!(f, "{prim}({args}) begin")?;
-                for cont in conts {
-                    write!(f, " {{{INDT}{NWLN}{cont}{DEDT}{NWLN}}} ")?;
-                }
-                write!(f, "end")
             }
             MExpr::Call {
                 bind,
