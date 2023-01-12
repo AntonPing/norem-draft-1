@@ -142,8 +142,10 @@ impl ClosConv {
                         .fold(MExpr::make_tail_call(func1, args), |cont, (i, x)| {
                             MExpr::Stmt {
                                 bind: Some(*x),
-                                prim: StmtPrim::Load,
-                                args: vec![Atom::Var(c), Atom::Int(i as i64)],
+                                stmt: MStmt::Load {
+                                    arg1: Atom::Var(c),
+                                    index: i,
+                                },
                                 cont: Box::new(cont),
                             }
                         });
@@ -195,8 +197,10 @@ impl ClosConv {
                     .enumerate()
                     .fold(cont, |expr, (i, f)| MExpr::Stmt {
                         bind: Some(*f),
-                        prim: StmtPrim::Offset,
-                        args: vec![Atom::Var(c), Atom::Int(i as i64)],
+                        stmt: MStmt::Offset {
+                            arg1: Atom::Var(c),
+                            index: i,
+                        },
                         cont: Box::new(expr),
                     });
 
@@ -206,50 +210,35 @@ impl ClosConv {
                     .enumerate()
                     .fold(cont, |expr, (i, x)| MExpr::Stmt {
                         bind: None,
-                        prim: StmtPrim::Store,
-                        args: vec![
-                            Atom::Var(c),
-                            Atom::Int(i as i64),
-                            Atom::Var(*func_map.get(x).unwrap_or(x)),
-                        ],
+                        stmt: MStmt::Store {
+                            arg1: Atom::Var(c),
+                            index: i,
+                            arg2: Atom::Var(*func_map.get(x).unwrap_or(x)),
+                        },
                         cont: Box::new(expr),
                     });
 
                 // here is the (record creation) part
                 let cont = MExpr::Stmt {
                     bind: Some(c),
-                    prim: StmtPrim::Alloc,
-                    args: vec![Atom::Int(freevars.len() as i64)],
+                    stmt: MStmt::Alloc {
+                        size: freevars.len(),
+                    },
                     cont: Box::new(cont),
                 };
 
                 cont
             }
-            MExpr::Stmt {
-                bind,
-                prim,
-                args,
-                cont,
-            } => {
+            MExpr::Stmt { bind, stmt, cont } => {
                 let cont = Box::new(self.visit_expr(*cont));
                 if let Some(x) = bind {
                     self.free.remove(&x);
                 }
-                let args: Vec<Atom> = args.into_iter().map(|arg| self.visit_atom(arg)).collect();
-                MExpr::Stmt {
-                    prim,
-                    args,
-                    bind,
-                    cont,
-                }
-            }
-            MExpr::Brch { prim, args, conts } => {
-                let conts = conts
-                    .into_iter()
-                    .map(|cont| self.visit_expr(cont))
-                    .collect();
-                let args: Vec<Atom> = args.into_iter().map(|arg| self.visit_atom(arg)).collect();
-                MExpr::Brch { prim, args, conts }
+                let stmt = stmt
+                    .args_map(|arg| self.visit_atom(arg))
+                    .brchs_map(|brch| self.visit_expr(brch));
+
+                MExpr::Stmt { bind, stmt, cont }
             }
             MExpr::Call {
                 bind,
@@ -274,8 +263,10 @@ impl ClosConv {
                 let args: Vec<_> = args.into_iter().map(|arg| self.visit_atom(arg)).collect();
                 MExpr::Stmt {
                     bind: Some(f2),
-                    prim: StmtPrim::Load,
-                    args: vec![Atom::Var(f), Atom::Int(0)],
+                    stmt: MStmt::Load {
+                        arg1: Atom::Var(f),
+                        index: 0,
+                    },
                     cont: Box::new(MExpr::Call {
                         func: CallFunc::Intern(f2),
                         args: {
@@ -331,48 +322,36 @@ impl ClosConv {
 }
 
 #[test]
-#[allow(unused_imports)]
 fn clos_conv_test() {
-    use crate::anf::BrchPrim::*;
-    use crate::anf::StmtPrim::*;
-    use crate::parser::*;
-    use crate::renamer::Renamer;
-    use crate::{atom, decls, expr, ident};
-    let expr1 = expr! {
-        letin [
-            fun f1 (x1) => {
-                retn x1;
-            }
-        ] {
-            call r = f1 (42);
-            retn r;
-        }
-    };
+    use crate::anf::anf_build::*;
 
+    let expr1 = letin_block(
+        vec![fun("f1", vec!["x1"], retn(v("x1")))],
+        vec![call("r", "f1", vec![i(42)]), retn(v("r"))],
+    );
     let expr1 = ClosConv::run(expr1);
-    let expr2 = expr! {
-        letin [
-            fun f1_1 (x1_1) => {
-                retn x1_1;
-            };
-            fun f1_2 (c1,x1_2) => {
-                call r1 = f1_1 (x1_2);
-                retn r1;
-            }
-        ] {
-            stmt c2 = Alloc, 1;
-            stmt Store, c2, 0, f1_2;
-            stmt c3 = Offset, c2, 0;
-            stmt f2 = Load, c3, 0;
-            call r2 = f2 (c3, 42);
-            retn r2;
-        }
-    };
+    let expr2 = letin_block(
+        vec![
+            fun("f1_1", vec!["x1_1"], retn(v("x1_1"))),
+            fun(
+                "f1_2",
+                vec!["c1", "x1_2"],
+                block(vec![call("r1", "f1_1", vec![v("x1_2")]), retn(v("r1"))]),
+            ),
+        ],
+        vec![
+            alloc("c2", 1),
+            store(v("c2"), 0, v("f1_2")),
+            offset("c3", v("c2"), 0),
+            load("f2", v("c3"), 0),
+            call("r2", "f2", vec![v("c3"), i(42)]),
+            retn(v("r2")),
+        ],
+    );
     assert_eq!(expr1, expr2);
 
     /*
     todo: more complicated tests
-
     let expr1 = expr! {
         letin [
             fun f1 (x1) => {
