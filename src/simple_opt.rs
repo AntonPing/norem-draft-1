@@ -1,150 +1,77 @@
+use crate::anf::*;
+use crate::env_map::*;
+use crate::intern::Unique;
 use std::collections::{HashMap, HashSet};
 
-use crate::anf::*;
-use crate::intern::Unique;
-
+#[derive(Clone, Debug)]
 pub struct ConstFold {
-    map: HashMap<Unique, Atom>,
+    atom_map: EnvMap<Unique, Atom>,
+    alloc_map: EnvMap<Unique, usize>,
+    store_map: EnvMap<(Unique, usize), Atom>,
+    offset_map: EnvMap<Unique, (Unique, usize)>,
+    ret_stack: Vec<(Unique, MExpr)>,
 }
 
 impl ConstFold {
-    pub fn new() -> ConstFold {
-        ConstFold {
-            map: HashMap::new(),
-        }
-    }
     pub fn run(expr: MExpr) -> MExpr {
         let mut pass = ConstFold::new();
         pass.visit_expr(expr)
     }
-
-    fn visit_expr(&mut self, expr: MExpr) -> MExpr {
-        match expr {
-            MExpr::LetIn { decls, cont } => {
-                let decls = decls
-                    .into_iter()
-                    .map(|decl| self.visit_decl(decl))
-                    .collect();
-                let cont = Box::new(self.visit_expr(*cont));
-                MExpr::LetIn { decls, cont }
-            }
-            MExpr::Stmt { bind, stmt, cont } => {
-                let stmt = stmt
-                    .args_map(|arg| self.visit_atom(arg))
-                    .brchs_map(|brch| self.visit_expr(brch));
-
-                let stmt = match stmt {
-                    MStmt::IAdd { arg1, arg2 } => {
-                        if let (Some(z), Atom::Int(x), Atom::Int(y)) = (bind, arg1, arg2) {
-                            self.map.insert(z, Atom::Int(x + y));
-                            return self.visit_expr(*cont);
-                        } else {
-                            stmt
-                        }
-                    }
-                    MStmt::ISub { arg1, arg2 } => {
-                        if let (Some(z), Atom::Int(x), Atom::Int(y)) = (bind, arg1, arg2) {
-                            self.map.insert(z, Atom::Int(x - y));
-                            return self.visit_expr(*cont);
-                        } else {
-                            stmt
-                        }
-                    }
-                    MStmt::IMul { arg1, arg2 } => {
-                        if let (Some(z), Atom::Int(x), Atom::Int(y)) = (bind, arg1, arg2) {
-                            self.map.insert(z, Atom::Int(x * y));
-                            return self.visit_expr(*cont);
-                        } else {
-                            stmt
-                        }
-                    }
-                    MStmt::Move { arg1 } => {
-                        if let Some(z) = bind {
-                            self.map.insert(z, arg1);
-                            return self.visit_expr(*cont);
-                        } else {
-                            stmt
-                        }
-                    }
-                    MStmt::Alloc { .. } => stmt,
-                    MStmt::Load { .. } => stmt,
-                    MStmt::Store { .. } => stmt,
-                    MStmt::Offset { .. } => stmt,
-                    MStmt::Ifte { arg1, brch1, brch2 } => {
-                        if let Atom::Bool(p) = arg1 {
-                            let cont = self.visit_expr(*cont);
-                            if p {
-                                return brch1.concat(bind, cont);
-                            } else {
-                                return brch2.concat(bind, cont);
-                            }
-                        } else {
-                            MStmt::Ifte { arg1, brch1, brch2 }
-                        }
-                    }
-                    MStmt::Switch { arg1, brchs } => {
-                        if let Atom::Int(x) = arg1 {
-                            let cont = self.visit_expr(*cont);
-                            return brchs
-                                .into_iter()
-                                .nth(x as usize)
-                                .unwrap()
-                                .concat(bind, cont);
-                        } else {
-                            MStmt::Switch { arg1, brchs }
-                        }
-                    }
-                };
-
-                let cont = Box::new(self.visit_expr(*cont));
-                MExpr::Stmt { bind, stmt, cont }
-            }
-            MExpr::Call {
-                bind,
-                func,
-                args,
-                cont,
-            } => {
-                let func = self.visit_call_func(func);
-                let args = args.into_iter().map(|arg| self.visit_atom(arg)).collect();
-                let cont = Box::new(self.visit_expr(*cont));
-                MExpr::Call {
-                    func,
-                    args,
-                    bind,
-                    cont,
-                }
-            }
-            MExpr::Retn { atom } => {
-                let atom = self.visit_atom(atom);
-                MExpr::Retn { atom }
-            }
+    fn new() -> ConstFold {
+        ConstFold {
+            atom_map: EnvMap::new(),
+            alloc_map: EnvMap::new(),
+            store_map: EnvMap::new(),
+            offset_map: EnvMap::new(),
+            ret_stack: Vec::new(),
         }
     }
-
+    #[allow(dead_code)]
+    fn get_real_addr(&self, var: Unique, index: usize) -> (Unique, usize) {
+        self.offset_map
+            .get(&var)
+            .map(|(var2, index2)| {
+                assert!(self.alloc_map.contains_key(&var2));
+                assert!(self.alloc_map[&var2] > *index2 + index);
+                (*var2, *index2 + index)
+            })
+            .unwrap_or_else(|| {
+                assert!(self.alloc_map.contains_key(&var));
+                assert!(self.alloc_map[&var] > index);
+                (var, index)
+            })
+    }
+    fn enter_scope(&mut self) {
+        self.atom_map.enter_scope();
+        self.alloc_map.enter_scope();
+        self.store_map.enter_scope();
+        self.offset_map.enter_scope();
+    }
+    fn leave_scope(&mut self) {
+        self.atom_map.leave_scope();
+        self.alloc_map.leave_scope();
+        self.store_map.leave_scope();
+        self.offset_map.leave_scope();
+    }
+    fn visit_brch(&mut self, brch: MExpr) -> MExpr {
+        self.enter_scope();
+        let res = self.visit_expr(brch);
+        self.leave_scope();
+        res
+    }
     fn visit_decl(&mut self, decl: MDecl) -> MDecl {
         let MDecl { func, pars, body } = decl;
+        self.enter_scope();
         let body = self.visit_expr(body);
+        self.leave_scope();
         MDecl { func, pars, body }
     }
-
-    fn visit_call_func(&mut self, func: CallFunc) -> CallFunc {
-        match func {
-            CallFunc::Intern(var) => {
-                let atom = self.visit_atom(Atom::Var(var));
-                let var = atom.unwrap_variable();
-                CallFunc::Intern(var)
-            }
-            CallFunc::Extern(var) => CallFunc::Extern(var),
-        }
-    }
-
-    fn visit_atom(&mut self, atom: Atom) -> Atom {
+    fn visit_arg(&mut self, arg: Atom) -> Atom {
         // substitute until it's constant or no binding
-        let mut atom = atom;
+        let mut atom = arg;
         loop {
             if let Atom::Var(sym) = atom {
-                if let Some(res) = self.map.get(&sym) {
+                if let Some(res) = self.atom_map.get(&sym) {
                     atom = *res
                 } else {
                     return atom;
@@ -154,21 +81,225 @@ impl ConstFold {
             }
         }
     }
+    fn visit_expr(&mut self, expr: MExpr) -> MExpr {
+        let expr = expr.walk_arg(|arg| self.visit_arg(arg));
+        let expr = match expr {
+            MExpr::UnOp {
+                bind,
+                prim,
+                arg1,
+                cont,
+            } => {
+                use Atom::*;
+                use UnOpPrim::*;
+                match &(prim, arg1) {
+                    (Move, arg1) => {
+                        self.atom_map.insert(bind, *arg1);
+                        return self.visit_expr(*cont);
+                    }
+                    (INeg, Int(a)) => {
+                        self.atom_map.insert(bind, Int(-a));
+                        return self.visit_expr(*cont);
+                    }
+                    _ => {}
+                }
+                MExpr::UnOp {
+                    bind,
+                    prim,
+                    arg1,
+                    cont,
+                }
+            }
+            MExpr::BinOp {
+                bind,
+                prim,
+                arg1,
+                arg2,
+                cont,
+            } => {
+                use Atom::*;
+                use BinOpPrim::*;
+                match &(prim, arg1, arg2) {
+                    // a + b
+                    (IAdd, Int(a), Int(b)) => {
+                        self.atom_map.insert(bind, Int(a + b));
+                        return self.visit_expr(*cont);
+                    }
+                    // x + 0 = 0 + x = x
+                    (IAdd, Var(x), Int(0)) | (IAdd, Int(0), Var(x)) => {
+                        self.atom_map.insert(bind, Var(*x));
+                        return self.visit_expr(*cont);
+                    }
+                    // a - b
+                    (ISub, Int(a), Int(b)) => {
+                        self.atom_map.insert(bind, Int(a - b));
+                        return self.visit_expr(*cont);
+                    }
+                    // x - 0 = x
+                    (ISub, Var(x), Int(0)) => {
+                        self.atom_map.insert(bind, Var(*x));
+                        return self.visit_expr(*cont);
+                    }
+                    // x - x = 0
+                    (ISub, Var(x), Var(y)) if x == y => {
+                        self.atom_map.insert(bind, Int(0));
+                        return self.visit_expr(*cont);
+                    }
+                    // a * b
+                    (IMul, Int(a), Int(b)) => {
+                        self.atom_map.insert(bind, Int(a * b));
+                        return self.visit_expr(*cont);
+                    }
+                    // x * 0 = 0 * x = 0
+                    (IMul, Var(_x), Int(0)) | (IMul, Int(0), Var(_x)) => {
+                        self.atom_map.insert(bind, Int(0));
+                        return self.visit_expr(*cont);
+                    }
+                    // x * 1 = 1 * x = x
+                    (IMul, Var(x), Int(1)) | (IMul, Int(1), Var(x)) => {
+                        self.atom_map.insert(bind, Var(*x));
+                        return self.visit_expr(*cont);
+                    }
+                    _ => {}
+                }
+                MExpr::BinOp {
+                    bind,
+                    prim,
+                    arg1,
+                    arg2,
+                    cont,
+                }
+            }
+            MExpr::Alloc { bind, size, cont } => {
+                // self.alloc_map.insert(bind, size);
+                MExpr::Alloc { bind, size, cont }
+            }
+            MExpr::Load {
+                bind,
+                arg1,
+                index,
+                cont,
+            } => {
+                /*
+                let var = arg1.unwrap_var();
+                let addr = self.get_real_addr(var, index);
+                if let Some(res) = self.store_map.get(&addr) {
+                    self.atom_map.insert(bind, *res);
+                    return self.visit_expr(*cont);
+                }
+                */
+                MExpr::Load {
+                    bind,
+                    arg1,
+                    index,
+                    cont,
+                }
+            }
+            MExpr::Store {
+                arg1,
+                index,
+                arg2,
+                cont,
+            } => {
+                /*
+                let var = arg1.unwrap_var();
+                let addr = self.get_real_addr(var, index);
+                self.store_map.insert(addr, arg2);
+                */
+                MExpr::Store {
+                    arg1,
+                    index,
+                    arg2,
+                    cont,
+                }
+            }
+            MExpr::Offset {
+                bind,
+                arg1,
+                index,
+                cont,
+            } => {
+                if index == 0 {
+                    self.atom_map.insert(bind, arg1);
+                    return self.visit_expr(*cont);
+                } else {
+                    /*
+                    let var = arg1.unwrap_var();
+                    let addr = self.get_real_addr(var, index);
+                    self.offset_map.insert(bind, addr);
+                    */
+                    MExpr::Offset {
+                        bind,
+                        arg1,
+                        index,
+                        cont,
+                    }
+                }
+            }
+            MExpr::Ifte {
+                bind,
+                arg1,
+                brch1,
+                brch2,
+                cont,
+            } => {
+                if let Atom::Bool(p) = arg1 {
+                    self.ret_stack.push((bind, *cont));
+                    if p {
+                        return self.visit_expr(*brch1);
+                    } else {
+                        return self.visit_expr(*brch2);
+                    }
+                } else {
+                    MExpr::Ifte {
+                        bind,
+                        arg1,
+                        brch1,
+                        brch2,
+                        cont,
+                    }
+                }
+            }
+            MExpr::Switch {
+                bind,
+                arg1,
+                brchs,
+                cont,
+            } => {
+                if let Atom::Int(x) = arg1 {
+                    self.ret_stack.push((bind, *cont));
+                    let brch = brchs.into_iter().nth(x as usize).unwrap();
+                    return self.visit_expr(brch);
+                } else {
+                    MExpr::Switch {
+                        bind,
+                        arg1,
+                        brchs,
+                        cont,
+                    }
+                }
+            }
+            MExpr::Retn { arg1 } => {
+                if let Some((bind, cont)) = self.ret_stack.pop() {
+                    self.atom_map.insert(bind, arg1);
+                    return self.visit_expr(cont);
+                } else {
+                    MExpr::Retn { arg1 }
+                }
+            }
+            other => other,
+        };
+        expr.walk_brch(|brch| self.visit_brch(brch))
+            .walk_decl(|decl| self.visit_decl(decl))
+            .walk_cont(|cont| self.visit_expr(cont))
+    }
 }
 
-/*
-    Dead-Code Elimination Pass
-*/
-
-pub struct DeadElim {
-    free: HashSet<Unique>,
-}
-
-fn fix_point<T>(set: HashSet<T>, graph: HashMap<T, HashSet<T>>) -> HashSet<T>
+fn fix_point<T>(used: HashSet<T>, graph: HashMap<T, HashSet<T>>) -> HashSet<T>
 where
     T: std::hash::Hash + Copy + Eq,
 {
-    let mut set = set;
+    let mut set = used;
     let mut new = HashSet::new();
     loop {
         for key in &set {
@@ -188,75 +319,122 @@ where
     }
 }
 
+/*
+    Dead-Code Elimination Pass
+*/
+
+pub struct DeadElim {
+    free_set: FreeSet<Unique>,
+    load_map: EnvMap<Unique, HashSet<usize>>,
+    ret_used: Vec<bool>,
+}
+
 impl DeadElim {
-    pub fn new() -> DeadElim {
-        DeadElim {
-            free: HashSet::new(),
-        }
-    }
     pub fn run(expr: MExpr) -> MExpr {
         let mut pass = DeadElim::new();
         pass.visit_expr(expr)
     }
-
+    fn new() -> DeadElim {
+        DeadElim {
+            free_set: FreeSet::new(),
+            load_map: EnvMap::new(),
+            ret_used: vec![true],
+        }
+    }
+    fn enter_scope(&mut self) {
+        self.free_set.enter_scope();
+        self.load_map.enter_scope();
+    }
+    fn leave_scope(&mut self) {
+        self.free_set.leave_scope();
+        self.load_map.leave_scope();
+    }
+    fn visit_arg(&mut self, arg: Atom) -> Atom {
+        if let Atom::Var(var) = arg {
+            self.free_set.insert(var);
+        }
+        arg
+    }
     fn visit_expr(&mut self, expr: MExpr) -> MExpr {
-        match expr {
+        let expr = expr.walk_cont(|cont| self.visit_expr(cont));
+        let expr = match expr {
             MExpr::LetIn { decls, cont } => {
-                let func_names: Vec<Unique> = decls.iter().map(|decl| decl.func).collect();
-
-                let cont = Box::new(self.visit_expr(*cont));
-                let used_set: HashSet<Unique> = func_names
+                let used: HashSet<Unique> = decls
                     .iter()
-                    .filter(|func| self.free.remove(func))
-                    .copied()
+                    .map(|decl| decl.func)
+                    .filter(|func| self.free_set.contains(func))
                     .collect();
 
-                // collect for each func decl for reachable reference
-                let mut graph: HashMap<Unique, HashSet<Unique>> = HashMap::new();
-                let decls: Vec<MDecl> = decls
+                let names: HashSet<Unique> = decls.iter().map(|decl| decl.func).collect();
+
+                let (decls, sets): (Vec<MDecl>, Vec<HashSet<Unique>>) = decls
                     .into_iter()
                     .map(|decl| {
-                        let decl = self.visit_decl(decl);
-                        let used_set = func_names
+                        let MDecl { func, pars, body } = decl;
+                        self.enter_scope();
+                        let body = self.visit_expr(body);
+                        let set = self
+                            .free_set
                             .iter()
-                            .filter(|func| self.free.remove(&func))
-                            .copied()
+                            .filter(|var| names.contains(var))
+                            .cloned()
                             .collect();
-                        graph.insert(decl.func, used_set);
-                        decl
+                        self.leave_scope();
+                        (MDecl { func, pars, body }, set)
                     })
+                    .unzip();
+
+                let graph: HashMap<Unique, HashSet<Unique>> = decls
+                    .iter()
+                    .map(|decl| decl.func)
+                    .zip(sets.into_iter())
                     .collect();
 
-                // calculate the fix-point set, all functions that not in this set are unused functions
-                let used_set = fix_point(used_set, graph);
-
-                // delete all unused functions
+                let reachable = fix_point(used, graph);
                 let decls: Vec<MDecl> = decls
                     .into_iter()
-                    .filter(|decl| used_set.contains(&decl.func))
+                    .filter(|decl| reachable.contains(&decl.func))
                     .collect();
 
                 if decls.is_empty() {
-                    *cont
+                    return *cont;
                 } else {
                     MExpr::LetIn { decls, cont }
                 }
             }
-            MExpr::Stmt { bind, stmt, cont } => {
-                let cont = Box::new(self.visit_expr(*cont));
-                let used = if let Some(x) = bind {
-                    self.free.remove(&x)
-                } else {
-                    false
-                };
-                if !used && stmt.is_pure() {
+            MExpr::UnOp {
+                bind,
+                prim,
+                arg1,
+                cont,
+            } => {
+                if !self.free_set.contains(&bind) {
                     return *cont;
                 }
-                let stmt = stmt
-                    .brchs_map(|brch| self.visit_expr(brch))
-                    .args_map(|arg| self.visit_atom(arg));
-
-                MExpr::Stmt { bind, stmt, cont }
+                MExpr::UnOp {
+                    bind,
+                    prim,
+                    arg1,
+                    cont,
+                }
+            }
+            MExpr::BinOp {
+                bind,
+                prim,
+                arg1,
+                arg2,
+                cont,
+            } => {
+                if !self.free_set.contains(&bind) {
+                    return *cont;
+                }
+                MExpr::BinOp {
+                    bind,
+                    prim,
+                    arg1,
+                    arg2,
+                    cont,
+                }
             }
             MExpr::Call {
                 bind,
@@ -264,21 +442,9 @@ impl DeadElim {
                 args,
                 cont,
             } => {
-                let cont = Box::new(self.visit_expr(*cont));
-                let _used = if let Some(x) = bind {
-                    self.free.remove(&x)
-                } else {
-                    false
-                };
-                if false
-                /* !used && func.is_pure() */
-                {
-                    // todo: eliminate pure function call if the result is never used
-                    // can't do it now because we don't have that information yet
-                    return *cont;
+                if self.free_set.contains(&bind) {
+                    // todo: pure dead-call elimination
                 }
-                let func = self.visit_call_func(func);
-                let args = args.into_iter().map(|arg| self.visit_atom(arg)).collect();
                 MExpr::Call {
                     bind,
                     func,
@@ -286,77 +452,325 @@ impl DeadElim {
                     cont,
                 }
             }
-            MExpr::Retn { atom } => {
-                let atom = self.visit_atom(atom);
-                MExpr::Retn { atom }
+            MExpr::Retn { arg1 } => {
+                if *self.ret_used.last().unwrap() {
+                    MExpr::Retn { arg1 }
+                } else {
+                    MExpr::Retn { arg1: Atom::Unit }
+                }
             }
-        }
-    }
-
-    fn visit_call_func(&mut self, func: CallFunc) -> CallFunc {
-        match func {
-            CallFunc::Intern(var) => {
-                let atom = self.visit_atom(Atom::Var(var));
-                let var = atom.unwrap_variable();
-                CallFunc::Intern(var)
+            MExpr::Alloc { bind, size, cont } => {
+                if !self.free_set.contains(&bind) {
+                    return *cont;
+                }
+                MExpr::Alloc { bind, size, cont }
             }
-            CallFunc::Extern(var) => CallFunc::Extern(var),
-        }
-    }
+            MExpr::Load {
+                bind,
+                arg1,
+                index,
+                cont,
+            } => {
+                if !self.free_set.contains(&bind) {
+                    return *cont;
+                }
+                /*
+                let var = arg1.unwrap_variable();
+                // todo: better api (like `get_mut`) to avoid clone
+                let mut set = self.load_map.get(&var).unwrap().clone();
+                set.insert(index);
+                self.load_map.insert(var, set);
+                */
+                MExpr::Load {
+                    bind,
+                    arg1,
+                    index,
+                    cont,
+                }
+            }
+            MExpr::Store {
+                arg1,
+                index,
+                arg2,
+                cont,
+            } => {
+                /*
+                let var = arg1.unwrap_variable();
+                let set = self.load_map.get(&var).unwrap();
+                if set.is_empty() {
+                    return *cont;
+                } else {
+                    MExpr::Store { arg1, index, arg2, cont }
+                }
+                */
+                MExpr::Store {
+                    arg1,
+                    index,
+                    arg2,
+                    cont,
+                }
+            }
+            MExpr::Offset {
+                bind,
+                arg1,
+                index,
+                cont,
+            } => {
+                if !self.free_set.contains(&bind) {
+                    return *cont;
+                }
+                /*
+                let var = arg1.unwrap_variable();
+                let set = self.load_map.get(&var)
+                    .unwrap().iter()
+                    .flat_map(|n| if *n >= index { Some(n - index) } else {None})
+                    .collect();
+                self.load_map.insert(var, set);
+                */
+                MExpr::Offset {
+                    bind,
+                    arg1,
+                    index,
+                    cont,
+                }
+            }
+            MExpr::Ifte {
+                bind,
+                arg1,
+                brch1,
+                brch2,
+                cont,
+            } => {
+                if !self.free_set.contains(&bind) {
+                    self.ret_used.push(false)
+                } else {
+                    self.ret_used.push(true)
+                }
+                MExpr::Ifte {
+                    bind,
+                    arg1,
+                    brch1,
+                    brch2,
+                    cont,
+                }
+            }
+            MExpr::Switch {
+                bind,
+                arg1,
+                brchs,
+                cont,
+            } => {
+                if !self.free_set.contains(&bind) {
+                    self.ret_used.push(false)
+                } else {
+                    self.ret_used.push(true)
+                }
+                MExpr::Switch {
+                    bind,
+                    arg1,
+                    brchs,
+                    cont,
+                }
+            }
+        };
 
-    fn visit_atom(&mut self, atom: Atom) -> Atom {
-        if let Atom::Var(sym) = atom {
-            self.free.insert(sym);
-        }
-        atom
-    }
+        let expr = expr.walk_brch(|brch| {
+            self.enter_scope();
+            let res = self.visit_expr(brch);
+            self.leave_scope();
+            res
+        });
 
-    fn visit_decl(&mut self, decl: MDecl) -> MDecl {
-        let MDecl { func, pars, body } = decl;
-        let body = self.visit_expr(body);
-        for par in pars.iter() {
-            self.free.remove(par);
+        match &expr {
+            MExpr::Ifte { .. } => {
+                self.ret_used.pop();
+            }
+            MExpr::Switch { .. } => {
+                self.ret_used.pop();
+            }
+            _ => {}
         }
-        MDecl { func, pars, body }
+
+        expr.walk_arg(|arg| self.visit_arg(arg))
     }
 }
 
 #[test]
-#[allow(unused_imports)]
 fn const_fold_test() {
     use crate::anf::anf_build::*;
 
-    let expr1 = block(vec![
-        iadd("x", i(1), i(1)),
-        iadd("y", v("x"), i(1)),
-        iadd("z", v("y"), i(1)),
-        retn(v("z")),
+    // test arithmetic operation optimization(and move operation)
+    let expr1 = chain(vec![
+        iadd("x", i(1), i(2)),
+        _move("y", v("x")),
+        isub("z", v("y"), i(1)),
+        imul("r", v("z"), i(3)),
+        retn(v("r")),
     ]);
     let expr1 = ConstFold::run(expr1);
-    let expr2 = block(vec![retn(i(4))]);
+    let expr2 = retn(i(6));
     assert_eq!(expr1, expr2);
 
-    let expr1 = block(vec![
-        iadd("x", i(1), i(1)),
-        _move("y", v("x")),
-        call("z", "f", vec![v("x"), v("y")]),
+    // test if-then-else folding
+    let expr1 = chain(vec![
+        _move("x", i(42)),
+        ifte(
+            "j",
+            b(false),
+            chain(vec![iadd("y", v("x"), i(1)), retn(v("y"))]),
+            chain(vec![iadd("z", v("x"), i(2)), retn(v("z"))]),
+        ),
+        retn(v("j")),
+    ]);
+    let expr1 = ConstFold::run(expr1);
+    let expr2 = retn(i(44));
+    assert_eq!(expr1, expr2);
+
+    // test switch folding
+    let expr1 = chain(vec![
+        _move("x", i(42)),
+        switch(
+            "j",
+            i(1),
+            vec![
+                chain(vec![iadd("y1", v("x"), i(1)), retn(v("y1"))]),
+                chain(vec![iadd("y2", v("x"), i(2)), retn(v("y2"))]),
+                chain(vec![iadd("y3", v("x"), i(3)), retn(v("y3"))]),
+            ],
+        ),
+        retn(v("j")),
+    ]);
+    let expr1 = ConstFold::run(expr1);
+    let expr2 = retn(i(44));
+    assert_eq!(expr1, expr2);
+
+    /*
+    // test alloc, store and offset optimization
+    let expr1 = chain(vec![
+        alloc("m", 3),
+        store(v("m"), 0, i(1)),
+        store(v("m"), 1, i(2)),
+        store(v("m"), 2, i(3)),
+        offset("n", v("m"), 1),
+        load("x", v("n"), 0),
+        load("y", v("n"), 1),
+        iadd("z", v("x"), v("y")),
         retn(v("z")),
     ]);
     let expr1 = ConstFold::run(expr1);
-    let expr2 = block(vec![call("z", "f", vec![i(2), i(2)]), retn(v("z"))]);
+    let expr2 = chain(vec![
+        alloc("m", 3),
+        store(v("m"), 0, i(1)),
+        store(v("m"), 1, i(2)),
+        store(v("m"), 2, i(3)),
+        offset("n", v("m"), 1),
+        retn(i(5)),
+    ]);
     assert_eq!(expr1, expr2);
+    */
+    /*
+    // some critical case
+    let expr1 = chain(vec![
+        alloc("m", 1),
+        ifte(
+            "_",
+            v("?"),
+            chain(vec![
+                load("r1", v("m"), 0),
+                store(v("m"), 0, i(1)),
+                retn(v("r1")),
+            ]),
+            chain(vec![
+                load("r2", v("m"), 0),
+                store(v("m"), 0, i(2)),
+                retn(v("r2")),
+            ]),
+        ),
+        load("r", v("m"), 0),
+        store(v("m"), 0, i(3)),
+        retn(v("r")),
+    ]);
+    let expr1 = ConstFold::run(expr1);
+    println!("{expr1}");
+    */
 }
 
 #[test]
 fn dead_elim_test() {
     use crate::anf::anf_build::*;
-    let expr1 = block(vec![
+
+    // test dead arithmetic operation elimination
+    let expr1 = chain(vec![
         iadd("x", i(1), i(1)),
         iadd("y", v("x"), i(1)),
         iadd("z", v("y"), i(1)),
         retn(v("x")),
     ]);
     let expr1 = DeadElim::run(expr1);
-    let expr2 = block(vec![iadd("x", i(1), i(1)), retn(v("x"))]);
+    let expr2 = chain(vec![iadd("x", i(1), i(1)), retn(v("x"))]);
+    assert_eq!(expr1, expr2);
+
+    // test unused branch result
+    let expr1 = chain(vec![
+        iadd("x", i(1), i(1)),
+        ifte(
+            "_",
+            v("?"),
+            chain(vec![iadd("y", v("x"), i(1)), retn(v("y"))]),
+            chain(vec![retn(v("x"))]),
+        ),
+        retn(v("x")),
+    ]);
+    let expr1 = DeadElim::run(expr1);
+    let expr2 = chain(vec![
+        iadd("x", i(1), i(1)),
+        ifte(
+            "_",
+            v("?"),
+            chain(vec![retn(unit())]),
+            chain(vec![retn(unit())]),
+        ),
+        retn(v("x")),
+    ]);
+    assert_eq!(expr1, expr2);
+
+    // test unused function declaration
+    let expr1 = let_in(
+        vec![
+            fun(
+                "f1",
+                vec!["x1"],
+                chain(vec![call("r1", "f2", vec![v("x1")]), retn(v("r1"))]),
+            ),
+            fun(
+                "f2",
+                vec!["x2"],
+                chain(vec![call("r2", "f1", vec![v("x2")]), retn(v("r2"))]),
+            ),
+            fun(
+                "f3",
+                vec!["x3"],
+                chain(vec![call("r3", "f3", vec![v("x3")]), retn(v("r3"))]),
+            ),
+            fun("f4", vec!["x4"], chain(vec![retn(v("x4"))])),
+        ],
+        vec![call("y1", "f1", vec![i(1)]), retn(v("y1"))],
+    );
+    let expr1 = DeadElim::run(expr1);
+    let expr2 = let_in(
+        vec![
+            fun(
+                "f1",
+                vec!["x1"],
+                chain(vec![call("r1", "f2", vec![v("x1")]), retn(v("r1"))]),
+            ),
+            fun(
+                "f2",
+                vec!["x2"],
+                chain(vec![call("r2", "f1", vec![v("x2")]), retn(v("r2"))]),
+            ),
+        ],
+        vec![call("y1", "f1", vec![i(1)]), retn(v("y1"))],
+    );
     assert_eq!(expr1, expr2);
 }
