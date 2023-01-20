@@ -1,8 +1,9 @@
 use std::borrow::Borrow;
-use std::collections::hash_map::{Iter, Keys, Values};
-use std::collections::HashMap;
+use std::collections::{hash_map, hash_set};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::mem;
 
 /// `EnvOpr<K,V>` records all the operation have done.
 /// When the `EnvMap` do [`EnvMap::insert`] or [`EnvMap::remove`], an `EnvOpr` is created
@@ -31,7 +32,7 @@ enum EnvOpr<K, V> {
 #[derive(Clone, Debug)]
 pub struct EnvMap<K, V> {
     /// The wrapped HashMap allow us to do all the work.
-    basemap: HashMap<K, V>,
+    base_map: HashMap<K, V>,
     /// History records all the operations that have done.
     history: Vec<EnvOpr<K, V>>,
     /// Scopes records the hisory pivot for each scope
@@ -46,7 +47,7 @@ where
     /// Creating an empty EnvMap
     pub fn new() -> EnvMap<K, V> {
         EnvMap {
-            basemap: HashMap::new(),
+            base_map: HashMap::new(),
             history: Vec::new(),
             scopes: Vec::new(),
         }
@@ -55,7 +56,7 @@ where
     /// Creating an empty EnvMap with capacity
     pub fn with_capacity(capacity: usize) -> EnvMap<K, V> {
         EnvMap {
-            basemap: HashMap::with_capacity(capacity),
+            base_map: HashMap::with_capacity(capacity),
             history: Vec::new(),
             scopes: Vec::new(),
         }
@@ -63,27 +64,27 @@ where
 
     /// Returns the number of elements the map can hold without reallocating.
     pub fn capacity(&self) -> usize {
-        self.basemap.capacity()
+        self.base_map.capacity()
     }
 
     /// An iterator visiting all keys in arbitrary order.
-    pub fn keys(&self) -> Keys<'_, K, V> {
-        self.basemap.keys()
+    pub fn keys(&self) -> hash_map::Keys<'_, K, V> {
+        self.base_map.keys()
     }
 
     /// An iterator visiting all values in arbitrary order.
-    pub fn values(&self) -> Values<'_, K, V> {
-        self.basemap.values()
+    pub fn values(&self) -> hash_map::Values<'_, K, V> {
+        self.base_map.values()
     }
 
     /// An iterator visiting all key-value pairs in arbitrary order.
-    pub fn iter(&self) -> Iter<'_, K, V> {
-        self.basemap.iter()
+    pub fn iter(&self) -> hash_map::Iter<'_, K, V> {
+        self.base_map.iter()
     }
 
     /// Returns `true` if the map contains no elements.
     pub fn is_empty(&self) -> bool {
-        self.basemap.is_empty()
+        self.base_map.is_empty()
     }
 
     /// Returns a reference to the value corresponding to the key.
@@ -92,7 +93,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq,
     {
-        self.basemap.get(k)
+        self.base_map.get(k)
     }
 
     /// Returns the key-value pair corresponding to the supplied key.
@@ -101,7 +102,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq,
     {
-        self.basemap.get_key_value(k)
+        self.base_map.get_key_value(k)
     }
 
     /// Returns `true` if the map contains a value for the specified key.
@@ -110,12 +111,12 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq,
     {
-        self.basemap.contains_key(k)
+        self.base_map.contains_key(k)
     }
 
     /// Inserts a key-value pair into the map.
     pub fn insert(&mut self, k: K, v: V) -> bool {
-        if let Some(old) = self.basemap.insert(k.clone(), v) {
+        if let Some(old) = self.base_map.insert(k.clone(), v) {
             self.history.push(EnvOpr::Update(k, old));
             true
         } else {
@@ -126,7 +127,7 @@ where
 
     /// Removes a key from the map
     pub fn remove(&mut self, k: &K) -> bool {
-        if let Some(old) = self.basemap.remove(k) {
+        if let Some(old) = self.base_map.remove(k) {
             self.history.push(EnvOpr::Delete(k.clone(), old));
             true
         } else {
@@ -147,17 +148,17 @@ where
             match self.history.pop().unwrap() {
                 EnvOpr::Update(k, v) => {
                     // recover the old value that was covered by insert
-                    let r = self.basemap.insert(k, v);
+                    let r = self.base_map.insert(k, v);
                     assert!(r.is_some());
                 }
                 EnvOpr::Insert(k) => {
                     // remove the inserted key and value
-                    let r = self.basemap.remove(&k);
+                    let r = self.base_map.remove(&k);
                     assert!(r.is_some());
                 }
                 EnvOpr::Delete(k, v) => {
                     // recover the deleted key and value
-                    let r = self.basemap.insert(k, v);
+                    let r = self.base_map.insert(k, v);
                     assert!(r.is_none());
                 }
                 EnvOpr::Nothing => {
@@ -165,6 +166,17 @@ where
                 }
             }
         }
+    }
+}
+
+impl<K, V> std::ops::Index<&K> for EnvMap<K, V>
+where
+    K: Hash + Eq,
+{
+    type Output = V;
+
+    fn index(&self, index: &K) -> &Self::Output {
+        &self.base_map[index]
     }
 }
 
@@ -183,4 +195,101 @@ fn env_map_test() {
     assert_eq!(env.get(&1), Some(&'a'));
     assert_eq!(env.get(&2), None);
     assert_eq!(env.get(&3), None);
+}
+
+#[derive(Clone, Debug)]
+pub struct FreeSet<T> {
+    /// The wrapped HashSet allow us to do all the work.
+    base_set: HashSet<T>,
+    /// Vec of saved HashSet
+    set_vec: Vec<HashSet<T>>,
+}
+
+impl<T> FreeSet<T>
+where
+    T: Eq + Hash + Clone,
+{
+    /// Creating an empty FreeSet
+    pub fn new() -> FreeSet<T> {
+        FreeSet {
+            base_set: HashSet::new(),
+            set_vec: Vec::new(),
+        }
+    }
+
+    /// Creating an empty FreeSet with capacity
+    pub fn with_capacity(capacity: usize) -> FreeSet<T> {
+        FreeSet {
+            base_set: HashSet::with_capacity(capacity),
+            set_vec: Vec::new(),
+        }
+    }
+
+    /// Returns the number of elements the map can hold without reallocating.
+    pub fn capacity(&self) -> usize {
+        self.base_set.capacity()
+    }
+
+    /// An iterator visiting all key-value pairs in arbitrary order.
+    pub fn iter(&self) -> hash_set::Iter<'_, T> {
+        self.base_set.iter()
+    }
+
+    /// Returns true if the set contains no elements.
+    pub fn is_empty(&self) -> bool {
+        self.base_set.is_empty()
+    }
+
+    /// Returns true if the set contains a value.
+    pub fn contains<Q: ?Sized>(&self, value: &Q) -> bool
+    where
+        T: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.base_set.contains(value)
+    }
+
+    // Adds a value to the set.
+    pub fn insert(&mut self, value: T) -> bool {
+        self.base_set.insert(value)
+    }
+
+    /// Removes a value from the set. Returns whether the value was present in the set.
+    pub fn remove<Q: ?Sized>(&mut self, value: &Q) -> bool
+    where
+        T: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.base_set.remove(value)
+    }
+
+    /// Enter a new scope, push base set into stack and open a new one.
+    pub fn enter_scope(&mut self) {
+        let mut temp = HashSet::new();
+        mem::swap(&mut temp, &mut self.base_set);
+        self.set_vec.push(temp);
+    }
+
+    /// Leave from a scope, pop a set from stack and extend it with current base set.
+    pub fn leave_scope(&mut self) {
+        let mut temp = self.set_vec.pop().unwrap();
+        temp.extend(self.base_set.drain());
+        mem::swap(&mut temp, &mut self.base_set);
+    }
+}
+
+#[test]
+fn free_set_test() {
+    let mut env = FreeSet::new();
+    env.insert('a');
+    env.enter_scope();
+    env.insert('b');
+    env.insert('c');
+    assert!(!env.contains(&'a'));
+    assert!(env.contains(&'b'));
+    assert!(env.contains(&'c'));
+    env.leave_scope();
+    assert!(env.contains(&'a'));
+    assert!(env.contains(&'b'));
+    assert!(env.contains(&'c'));
 }
