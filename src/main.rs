@@ -9,10 +9,10 @@ pub mod renamer;
 pub mod infer;
 pub mod diagnostic;
 pub mod anf;
-pub mod normalize;
-pub mod simple_opt;
-pub mod clos_conv;
-pub mod codegen;
+// pub mod normalize;
+// pub mod simple_opt;
+// pub mod clos_conv;
+// pub mod codegen;
 
 fn main() {
     println!("Hello, world!");

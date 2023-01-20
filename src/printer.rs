@@ -255,43 +255,34 @@ impl<Ident: Display> Display for Type<Ident> {
     }
 }
 
-impl Display for MStmt {
+impl Display for Atom {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            MStmt::IAdd { arg1, arg2 } => {
-                write!(f, "iadd({arg1}, {arg2})")
-            }
-            MStmt::ISub { arg1, arg2 } => {
-                write!(f, "isub({arg1}, {arg2})")
-            }
-            MStmt::IMul { arg1, arg2 } => {
-                write!(f, "imul({arg1}, {arg2})")
-            }
-            MStmt::Move { arg1 } => {
-                write!(f, "move({arg1})")
-            }
-            MStmt::Alloc { size } => {
-                write!(f, "alloc({size})")
-            }
-            MStmt::Load { arg1, index } => {
-                write!(f, "load({arg1}[{index}])")
-            }
-            MStmt::Store { arg1, index, arg2 } => {
-                write!(f, "store({arg1}[{index}],{arg2})")
-            }
-            MStmt::Offset { arg1, index } => {
-                write!(f, "offset({arg1}[{index}])")
-            }
-            MStmt::Ifte { arg1, brch1, brch2 } => {
-                write!(f, "if({arg1}) then{INDT}{NWLN}{brch1}{DEDT}{NWLN}else{INDT}{NWLN}{brch2}{DEDT}{NWLN}")
-            }
-            MStmt::Switch { arg1, brchs } => {
-                write!(f, "swith({arg1}) {{")?;
-                for (i, brch) in brchs.iter().enumerate() {
-                    write!(f, "{INDT}{NWLN}case {i}: {brch}{DEDT}{NWLN}")?;
-                }
-                write!(f, "}}")
-            }
+            Atom::Var(x) => write!(f, "{x}"),
+            Atom::Int(x) => write!(f, "{x}"),
+            Atom::Real(x) => write!(f, "{x}"),
+            Atom::Bool(x) => write!(f, "{x}"),
+            Atom::Char(x) => write!(f, "{x}"),
+            Atom::Unit => write!(f, "()"),
+        }
+    }
+}
+
+impl Display for UnOpPrim {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            UnOpPrim::Move => write!(f, "move"),
+            UnOpPrim::INeg => write!(f, "ineg"),
+        }
+    }
+}
+
+impl Display for BinOpPrim {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            BinOpPrim::IAdd => write!(f, "iadd"),
+            BinOpPrim::ISub => write!(f, "isub"),
+            BinOpPrim::IMul => write!(f, "imul"),
         }
     }
 }
@@ -306,12 +297,22 @@ impl Display for MExpr {
                 }
                 write!(f, "{DEDT}{NWLN}in{INDT}{NWLN}{cont}{DEDT}{NWLN}end")
             }
-            MExpr::Stmt { bind, stmt, cont } => {
-                if let Some(x) = bind {
-                    write!(f, "let {x} = {stmt};{NWLN}{cont}")
-                } else {
-                    write!(f, "{stmt};{NWLN}{cont}")
-                }
+            MExpr::UnOp {
+                bind,
+                prim,
+                arg1,
+                cont,
+            } => {
+                write!(f, "let {bind} = {prim}({arg1});{NWLN}{cont}")
+            }
+            MExpr::BinOp {
+                bind,
+                prim,
+                arg1,
+                arg2,
+                cont,
+            } => {
+                write!(f, "let {bind} = {prim}({arg1},{arg2});{NWLN}{cont}")
             }
             MExpr::Call {
                 bind,
@@ -320,14 +321,60 @@ impl Display for MExpr {
                 cont,
             } => {
                 let args = args.iter().format(&", ");
-                if let Some(x) = bind {
-                    write!(f, "let {x} = {func}({args});{NWLN}{cont}")
-                } else {
-                    write!(f, "{func}({args});{NWLN}{cont}")
-                }
+                write!(f, "let {bind} = {func}({args});{NWLN}{cont}")
             }
-            MExpr::Retn { atom } => {
-                write!(f, "return {atom}")
+            MExpr::Retn { arg1 } => {
+                write!(f, "return {arg1}")
+            }
+            MExpr::Alloc { bind, size, cont } => {
+                write!(f, "let {bind} = alloc[{size}];{NWLN}{cont}")
+            }
+            MExpr::Load {
+                bind,
+                arg1,
+                index,
+                cont,
+            } => {
+                write!(f, "let {bind} = load {arg1}[{index}];{NWLN}{cont}")
+            }
+            MExpr::Store {
+                arg1,
+                index,
+                arg2,
+                cont,
+            } => {
+                write!(f, "store {arg1}[{index}] := {arg2};{NWLN}{cont}")
+            }
+            MExpr::Offset {
+                bind,
+                arg1,
+                index,
+                cont,
+            } => {
+                write!(f, "let {bind} = offset {arg1}[{index}];{NWLN}{cont}")
+            }
+            MExpr::Ifte {
+                bind,
+                arg1,
+                brch1,
+                brch2,
+                cont,
+            } => {
+                write!(f, "let {bind} = if({arg1}) then")?;
+                write!(f, "{INDT}{NWLN}{brch1}{DEDT}{NWLN}else")?;
+                write!(f, "{INDT}{NWLN}{brch2}{DEDT}{NWLN};{NWLN}{cont}")
+            }
+            MExpr::Switch {
+                bind,
+                arg1,
+                brchs,
+                cont,
+            } => {
+                write!(f, "let {bind} = switch({arg1}) {{{INDT}")?;
+                for (i, brch) in brchs.iter().enumerate() {
+                    write!(f, "{NWLN}case {i}:{INDT}{NWLN}{brch}{DEDT}")?;
+                }
+                write!(f, "{DEDT}{NWLN}}}{NWLN}{cont}")
             }
         }
     }
