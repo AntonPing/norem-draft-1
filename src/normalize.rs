@@ -5,9 +5,10 @@ use crate::intern::Unique;
 pub fn subst(expr: MExpr, hole: Unique, atom: Atom) -> MExpr {
     // subst(expr,hole,atom) ~=~ let hole = move(atom); expr
     // it will be substituted in constant-fold pass anyway
-    MExpr::Stmt {
-        bind: Some(hole),
-        stmt: MStmt::Move { arg1: atom },
+    MExpr::UnOp {
+        bind: hole,
+        prim: UnOpPrim::Move,
+        arg1: atom,
         cont: Box::new(expr),
     }
 }
@@ -18,7 +19,7 @@ pub fn normalize_expr(expr: &Expr<Unique>) -> MExpr {
         expr,
         bind,
         MExpr::Retn {
-            atom: Atom::Var(bind),
+            arg1: Atom::Var(bind),
         },
     )
 }
@@ -34,31 +35,18 @@ fn normalize_expr_aux(expr: &Expr<Unique>, hole: Unique, ctx: MExpr) -> MExpr {
             // normalize(e2,x2,normalize(e1,x1, let hole = iadd(x1,x2) in ctx))
             let tempvars: Vec<Unique> = args.iter().map(|_| Unique::generate('x')).collect();
 
-            let stmt = match prim {
-                Builtin::IAdd => {
-                    assert_eq!(args.len(), 2);
-                    MStmt::IAdd {
-                        arg1: Atom::Var(tempvars[0]),
-                        arg2: Atom::Var(tempvars[1]),
-                    }
-                }
-                Builtin::ISub => {
-                    assert_eq!(args.len(), 2);
-                    MStmt::ISub {
-                        arg1: Atom::Var(tempvars[0]),
-                        arg2: Atom::Var(tempvars[1]),
-                    }
-                }
-                Builtin::IMul => {
-                    assert_eq!(args.len(), 2);
-                    MStmt::IMul {
-                        arg1: Atom::Var(tempvars[0]),
-                        arg2: Atom::Var(tempvars[1]),
-                    }
-                }
+            pub enum OpPrim {
+                Unary(UnOpPrim),
+                Binary(BinOpPrim),
+            }
+
+            let prim = match prim {
+                Builtin::IAdd => OpPrim::Binary(BinOpPrim::IAdd),
+                Builtin::ISub => OpPrim::Binary(BinOpPrim::ISub),
+                Builtin::IMul => OpPrim::Binary(BinOpPrim::IMul),
                 Builtin::IDiv => todo!(),
                 Builtin::IRem => todo!(),
-                Builtin::INeg => todo!(),
+                Builtin::INeg => OpPrim::Unary(UnOpPrim::INeg),
                 Builtin::RAdd => todo!(),
                 Builtin::RSub => todo!(),
                 Builtin::RMul => todo!(),
@@ -67,14 +55,33 @@ fn normalize_expr_aux(expr: &Expr<Unique>, hole: Unique, ctx: MExpr) -> MExpr {
                 Builtin::BOr => todo!(),
                 Builtin::BNot => todo!(),
             };
-            tempvars.into_iter().zip(args.iter()).fold(
-                MExpr::Stmt {
-                    bind: Some(hole),
-                    stmt,
-                    cont: Box::new(ctx),
-                },
-                |res, (bind, arg)| normalize_expr_aux(arg, bind, res),
-            )
+
+            let stmt = match prim {
+                OpPrim::Unary(prim) => {
+                    assert!(args.len() == 1);
+                    MExpr::UnOp {
+                        bind: hole,
+                        prim,
+                        arg1: Atom::Var(tempvars[0]),
+                        cont: Box::new(ctx),
+                    }
+                }
+                OpPrim::Binary(prim) => {
+                    assert!(args.len() == 2);
+                    MExpr::BinOp {
+                        bind: hole,
+                        prim,
+                        arg1: Atom::Var(tempvars[0]),
+                        arg2: Atom::Var(tempvars[1]),
+                        cont: Box::new(ctx),
+                    }
+                }
+            };
+
+            tempvars
+                .into_iter()
+                .zip(args.iter())
+                .fold(stmt, |res, (bind, arg)| normalize_expr_aux(arg, bind, res))
         }
         Expr::Fun { pars, body, .. } => {
             // normalize(fun(x,y) => e, hole, ctx) =
@@ -99,8 +106,8 @@ fn normalize_expr_aux(expr: &Expr<Unique>, hole: Unique, ctx: MExpr) -> MExpr {
             let funcvar = Unique::generate('f');
             let argvars: Vec<Unique> = args.iter().map(|_| Unique::generate('x')).collect();
             let res = MExpr::Call {
-                bind: Some(hole),
-                func: CallFunc::Intern(funcvar),
+                bind: hole,
+                func: Atom::Var(funcvar),
                 args: argvars.iter().map(|arg| Atom::Var(*arg)).collect(),
                 cont: Box::new(ctx),
             };
@@ -152,7 +159,7 @@ fn normalize_test() {
     let mut rnm = Renamer::new();
     let expr1 = rnm.visit_expr(expr1);
     let expr1 = normalize_expr(&expr1);
-    let expr2 = block(vec![
+    let expr2 = chain(vec![
         _move("x1", i(4)),
         _move("x2", i(3)),
         iadd("x3", v("x2"), v("x1")),
@@ -175,11 +182,11 @@ f(42)
     let mut rnm = Renamer::new();
     let expr1 = rnm.visit_expr(expr1);
     let expr1 = normalize_expr(&expr1);
-    let expr2 = letin_block(
+    let expr2 = let_in(
         vec![fun(
             "f1",
             vec!["x1"],
-            block(vec![
+            chain(vec![
                 _move("x2", i(1)),
                 _move("x3", v("x1")),
                 iadd("x4", v("x3"), v("x2")),
