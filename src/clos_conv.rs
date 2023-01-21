@@ -1,21 +1,22 @@
-use std::collections::{HashMap, HashSet};
-use std::mem;
-
 use itertools::Itertools;
+use std::collections::HashMap;
 
 use crate::anf::*;
+use crate::env_map::FreeSet;
 use crate::intern::Unique;
 
 pub struct ClosConv {
     toplevel: Vec<MDecl>,
-    free: HashSet<Unique>,
+    freevar: FreeSet<Unique>,
+    in_clos: HashMap<Unique, Unique>,
 }
 
 impl ClosConv {
     pub fn new() -> ClosConv {
         ClosConv {
             toplevel: Vec::new(),
-            free: HashSet::new(),
+            freevar: FreeSet::new(),
+            in_clos: HashMap::new(),
         }
     }
     pub fn run(expr: MExpr) -> MExpr {
@@ -23,20 +24,32 @@ impl ClosConv {
         let expr = pass.visit_expr(expr);
         MExpr::LetIn {
             decls: pass.toplevel,
+            // do renaming to obey the single-assignment rule
             cont: Box::new(expr),
         }
+        .rename()
     }
 
-    fn listen_free<T, F>(&mut self, func: F) -> T
-    where
-        F: FnOnce(&mut Self) -> T,
-    {
-        let mut temp = HashSet::new();
-        mem::swap(&mut temp, &mut self.free);
-        let result = func(self);
-        mem::swap(&mut temp, &mut self.free);
-        self.free.extend(temp.into_iter());
-        result
+    fn visit_bind(&mut self, bind: Unique) -> Unique {
+        self.freevar.remove(&bind);
+        bind
+    }
+
+    fn visit_arg(&mut self, atom: Atom) -> Atom {
+        if let Atom::Var(sym) = atom {
+            self.freevar.insert(sym);
+        }
+        atom
+    }
+
+    fn visit_decl(&mut self, decl: MDecl) -> MDecl {
+        let MDecl { func, pars, body } = decl;
+        let body = self.visit_expr(body);
+        self.freevar.remove(&func);
+        for par in pars.iter() {
+            self.freevar.remove(par);
+        }
+        MDecl { func, pars, body }
     }
 
     fn visit_expr(&mut self, expr: MExpr) -> MExpr {
@@ -51,122 +64,83 @@ impl ClosConv {
                     end
                     =======> becomes =======>
                     letrec
-                        foo1(v1,...,vn,x,y,...,z) =
-                            bar;
-                        foo2(c,x,y,...,z) =
+                        foo(c,x,y,...,z) =
                             let v1 = load(c,1);
                             ...
                             let vn = load(c,n);
-                            foo1(v1,...,vn,x,y,...,z);
+                            bar;
                     in
-                        let foo3 = alloc(n)
-                        store(foo3,0,foo2)
-                        store(foo3,1,v1)
-                        store(foo3,2,v2)
+                        let c = alloc(n)
+                        store(c,0,foo)
+                        store(c,1,v1)
+                        store(c,2,v2)
                         ...
-                        store(foo3,n,vn)
+                        store(c,n,vn)
                         baz[foo:=foo3]
                     end
                     where foo1, foo2, foo3 and c are generated variables
                 */
 
                 // record the order of function definition
-                let func_names: Vec<_> = decls.iter().map(|decl| decl.func).collect();
+                let func_names: Vec<Unique> = decls.iter().map(|decl| decl.func).collect();
+                let c = Unique::generate('c');
+
+                self.freevar.enter_scope();
+                for func in &func_names {
+                    self.in_clos.insert(*func, c);
+                }
 
                 // transform function and get their free variable set
-                let decls_frees: Vec<(_, Vec<_>)> = decls
+                let decls: Vec<_> = decls
                     .into_iter()
-                    .map(|decl| {
-                        self.listen_free(|slf| {
-                            let decl = slf.visit_decl(decl);
-                            let free = slf.free.iter().sorted().copied().collect();
-                            (decl, free)
-                        })
-                    })
+                    .map(|decl| self.visit_decl(decl))
                     .collect();
 
                 for func in &func_names {
-                    self.free.remove(func);
+                    self.in_clos.remove(func);
+                    self.freevar.remove(func);
                 }
 
-                // add function name to free var, although they are not
+                // add function name to the begining of freevar, even if they are not free
                 let freevars: Vec<Unique> = func_names
                     .iter()
-                    .chain(self.free.iter().sorted())
+                    .chain(self.freevar.iter().sorted())
                     .copied()
                     .collect();
 
+                self.freevar.leave_scope();
+
                 // instead of returning the let-block: CExpr::Let { decls, cont }
                 // we lift all decls to toplevel
-
-                let mut func_map: HashMap<Unique, Unique> = HashMap::new();
-                for (decl, free) in decls_frees {
+                for (idx, decl) in decls.into_iter().enumerate() {
+                    let MDecl {
+                        func,
+                        mut pars,
+                        body,
+                    } = decl;
+                    pars.insert(0, c);
                     /*
-                    foo1(v1,...,vn,x,y,...,z) =
+                    foo(x,y,...,z) =
                         bar;
-                    */
-                    let func1 = decl.func.rename();
-                    let pars1 = free.iter().chain(decl.pars.iter()).copied().collect();
-                    let body1 = decl.body;
-                    let decl1 = MDecl {
-                        func: func1,
-                        pars: pars1,
-                        body: body1,
-                    };
-                    self.toplevel.push(decl1);
-
-                    /*
-                    foo2(c,x',y',...,z') =
-                        let v1' = load(c,1);
+                    =======> becomes =======>
+                    foo(c,x,y,...,z) =
+                        let v1 = load(c,1);
                         ...
-                        let vn' = load(c,n);
-                        foo1(v1',...,vn',x',y',...,z');
+                        let vn = load(c,n);
+                        bar
                     */
-                    let new_pars: Vec<_> = decl.pars.iter().map(|x| x.rename()).collect();
-                    let new_free: Vec<_> = free.iter().map(|x| x.rename()).collect();
-                    let c = Unique::generate('c');
-                    let func2 = decl.func.rename();
-                    let pars2 = [c].into_iter().chain(new_pars.iter().copied()).collect();
-                    let args = new_free
-                        .iter()
-                        .cloned()
-                        .chain(new_pars.iter().copied())
-                        .map(|x| x.into())
-                        .collect();
-                    let body2 = freevars
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, x)| free.contains(x))
-                        .zip(new_free.iter())
-                        .map(|((i, _), x)| (i, x))
-                        .fold(MExpr::make_tail_call(func1, args), |cont, (i, x)| {
-                            MExpr::Stmt {
-                                bind: Some(*x),
-                                stmt: MStmt::Load {
-                                    arg1: Atom::Var(c),
-                                    index: i,
-                                },
-                                cont: Box::new(cont),
-                            }
-                        });
-                    let decl2 = MDecl {
-                        func: func2,
-                        pars: pars2,
-                        body: body2,
-                    };
-                    self.toplevel.push(decl2);
-                    func_map.insert(decl.func, func2);
+                    let body = freevars.iter().enumerate().skip(func_names.len()).fold(
+                        body,
+                        |cont, (i, x)| MExpr::Load {
+                            bind: *x,
+                            arg1: Atom::Var(c),
+                            index: i - idx,
+                            cont: Box::new(cont),
+                        },
+                    );
+                    let decl = MDecl { func, pars, body };
+                    self.toplevel.push(decl);
                 }
-
-                // transform let-block continuation
-                let cont = self.listen_free(|slf| {
-                    let cont = slf.visit_expr(*cont);
-                    cont
-                });
-                for func in &func_names {
-                    self.free.remove(func);
-                }
-
                 /*
                     (record creation)
                     let c = alloc(n+m)
@@ -188,136 +162,109 @@ impl ClosConv {
                     cont
                 */
 
+                let cont = Box::new(self.visit_expr(*cont));
+
                 // generate shared closure 'c'
                 let c = Unique::generate('c');
 
                 // here is the (function offset) part
-                let cont = func_names
-                    .iter()
-                    .enumerate()
-                    .fold(cont, |expr, (i, f)| MExpr::Stmt {
-                        bind: Some(*f),
-                        stmt: MStmt::Offset {
+                let cont =
+                    func_names
+                        .iter()
+                        .enumerate()
+                        .fold(*cont, |expr, (i, f)| MExpr::Offset {
+                            bind: *f,
                             arg1: Atom::Var(c),
                             index: i,
-                        },
-                        cont: Box::new(expr),
-                    });
+                            cont: Box::new(expr),
+                        });
 
                 // here is the (block functions) and (free variables) part
                 let cont = freevars
                     .iter()
                     .enumerate()
-                    .fold(cont, |expr, (i, x)| MExpr::Stmt {
-                        bind: None,
-                        stmt: MStmt::Store {
-                            arg1: Atom::Var(c),
-                            index: i,
-                            arg2: Atom::Var(*func_map.get(x).unwrap_or(x)),
-                        },
+                    .fold(cont, |expr, (i, x)| MExpr::Store {
+                        arg1: Atom::Var(c),
+                        index: i,
+                        arg2: Atom::Var(*x),
                         cont: Box::new(expr),
                     });
 
                 // here is the (record creation) part
-                let cont = MExpr::Stmt {
-                    bind: Some(c),
-                    stmt: MStmt::Alloc {
-                        size: freevars.len(),
-                    },
+                let cont = MExpr::Alloc {
+                    bind: c,
+                    size: freevars.len(),
                     cont: Box::new(cont),
                 };
 
                 cont
             }
-            MExpr::Stmt { bind, stmt, cont } => {
-                let cont = Box::new(self.visit_expr(*cont));
-                if let Some(x) = bind {
-                    self.free.remove(&x);
-                }
-                let stmt = stmt
-                    .args_map(|arg| self.visit_atom(arg))
-                    .brchs_map(|brch| self.visit_expr(brch));
-
-                MExpr::Stmt { bind, stmt, cont }
-            }
             MExpr::Call {
                 bind,
-                func: CallFunc::Intern(f),
-                args,
-                cont,
-            } => {
-                /*
-                    let bind = func(a,b,...,z);
-                    cont;
-                    =====> becomes =====>
-                    let f = load(func,0);
-                    let bind = f(func,a,b,...,z);
-                    cont;
-                */
-                let f2 = Unique::generate('f');
-                let cont = Box::new(self.visit_expr(*cont));
-                if let Some(x) = bind {
-                    self.free.remove(&x);
-                }
-                self.free.insert(f);
-                let args: Vec<_> = args.into_iter().map(|arg| self.visit_atom(arg)).collect();
-                MExpr::Stmt {
-                    bind: Some(f2),
-                    stmt: MStmt::Load {
-                        arg1: Atom::Var(f),
-                        index: 0,
-                    },
-                    cont: Box::new(MExpr::Call {
-                        func: CallFunc::Intern(f2),
-                        args: {
-                            let mut args = args;
-                            args.insert(0, Atom::Var(f));
-                            args
-                        },
-                        bind,
-                        cont,
-                    }),
-                }
-            }
-            MExpr::Call {
-                bind,
-                func: CallFunc::Extern(f),
+                func,
                 args,
                 cont,
             } => {
                 let cont = Box::new(self.visit_expr(*cont));
-                if let Some(x) = bind {
-                    self.free.remove(&x);
-                }
-                let args = args.into_iter().map(|arg| self.visit_atom(arg)).collect();
-                MExpr::Call {
-                    func: CallFunc::Extern(f),
-                    args,
-                    bind,
-                    cont,
+                let bind = self.visit_bind(bind);
+                let func = self.visit_arg(func);
+                let args: Vec<_> = args.into_iter().map(|arg| self.visit_arg(arg)).collect();
+                match self.in_clos.get(&func.unwrap_var()).cloned() {
+                    Some(c) => {
+                        /*
+                            let bind = func(a,b,...,z);
+                            cont;
+                            =====> becomes =====>
+                            let bind = func(c,a,b,...,z);
+                            cont;
+                        */
+                        let mut args = args;
+                        args.insert(0, Atom::Var(c));
+                        MExpr::Call {
+                            bind,
+                            func,
+                            args,
+                            cont,
+                        }
+                    }
+                    None => {
+                        /*
+                            let bind = func(a,b,...,z);
+                            cont;
+                            =====> becomes =====>
+                            let f = load(func,0);
+                            let bind = f(func,a,b,...,z);
+                            cont;
+                        */
+                        let f2 = Unique::generate('f');
+                        MExpr::Load {
+                            bind: f2,
+                            arg1: func,
+                            index: 0,
+                            cont: Box::new(MExpr::Call {
+                                bind,
+                                func: Atom::Var(f2),
+                                args: {
+                                    let mut args = args;
+                                    args.insert(0, func);
+                                    args
+                                },
+                                cont,
+                            }),
+                        }
+                    }
                 }
             }
-            MExpr::Retn { atom } => {
-                let atom = self.visit_atom(atom);
-                MExpr::Retn { atom }
+            MExpr::Retn { arg1 } => {
+                let arg1 = self.visit_arg(arg1);
+                MExpr::Retn { arg1 }
             }
+            other => other
+                .walk_cont(|cont| self.visit_expr(cont))
+                .walk_bind(|bind| self.visit_bind(bind))
+                .walk_brch(|brch| self.visit_expr(brch))
+                .walk_arg(|arg| self.visit_arg(arg)),
         }
-    }
-
-    fn visit_atom(&mut self, atom: Atom) -> Atom {
-        if let Atom::Var(sym) = atom {
-            self.free.insert(sym);
-        }
-        atom
-    }
-
-    fn visit_decl(&mut self, decl: MDecl) -> MDecl {
-        let MDecl { func, pars, body } = decl;
-        let body = self.visit_expr(body);
-        for par in pars.iter() {
-            self.free.remove(par);
-        }
-        MDecl { func, pars, body }
     }
 }
 
@@ -325,82 +272,148 @@ impl ClosConv {
 fn clos_conv_test() {
     use crate::anf::anf_build::*;
 
-    let expr1 = letin_block(
-        vec![fun("f1", vec!["x1"], retn(v("x1")))],
-        vec![call("r", "f1", vec![i(42)]), retn(v("r"))],
-    );
+    // test free varible in function declaration
+    let expr1 = chain(vec![
+        iadd("v", i(1), i(2)),
+        let_in(
+            vec![fun(
+                "f1",
+                vec!["x1"],
+                chain(vec![iadd("r", v("x1"), v("v")), retn(v("r"))]),
+            )],
+            vec![call("r", "f1", vec![i(42)]), retn(v("r"))],
+        ),
+    ]);
     let expr1 = ClosConv::run(expr1);
-    let expr2 = letin_block(
+    let expr2 = let_in(
+        vec![fun(
+            "f1",
+            vec!["c1", "x1"],
+            chain(vec![
+                load("v2", v("c1"), 1),
+                iadd("r", v("x1"), v("v2")),
+                retn(v("r")),
+            ]),
+        )],
         vec![
-            fun("f1_1", vec!["x1_1"], retn(v("x1_1"))),
-            fun(
-                "f1_2",
-                vec!["c1", "x1_2"],
-                block(vec![call("r1", "f1_1", vec![v("x1_2")]), retn(v("r1"))]),
-            ),
-        ],
-        vec![
-            alloc("c2", 1),
-            store(v("c2"), 0, v("f1_2")),
-            offset("c3", v("c2"), 0),
-            load("f2", v("c3"), 0),
-            call("r2", "f2", vec![v("c3"), i(42)]),
-            retn(v("r2")),
+            iadd("v1", i(1), i(2)),
+            alloc("c2", 2),
+            store(v("c2"), 1, v("v1")),
+            store(v("c2"), 0, v("f1")),
+            offset("f1c", v("c2"), 0),
+            load("t", v("f1c"), 0),
+            call("r", "t", vec![v("f1c"), i(42)]),
+            retn(v("r")),
         ],
     );
     assert_eq!(expr1, expr2);
 
-    /*
-    todo: more complicated tests
-    let expr1 = expr! {
-        letin [
-            fun f1 (x1) => {
-                letin [
-                    fun f2 (x2) => {
-                        stmt x3 = IAdd, x1, x2;
-                        retn x3;
-                    }
-                ] {
-                    retn f2;
-                }
-            }
-        ] {
-            call f3 = f1 (1);
-            call res = f3 (2);
-            retn res;
-        }
-    };
+    // test mutual recursive declaration
+    let expr1 = let_in(
+        vec![
+            fun(
+                "f1",
+                vec!["x1"],
+                chain(vec![call("r1", "f2", vec![v("x1")]), retn(v("r1"))]),
+            ),
+            fun(
+                "f2",
+                vec!["x2"],
+                chain(vec![call("r2", "f1", vec![v("x2")]), retn(v("r2"))]),
+            ),
+        ],
+        vec![call("r3", "f1", vec![i(42)]), retn(v("r3"))],
+    );
     let expr1 = ClosConv::run(expr1);
+    let expr2 = let_in(
+        vec![
+            fun(
+                "f1",
+                vec!["c1", "x1"],
+                chain(vec![
+                    call("r1", "f2", vec![v("c1"), v("x1")]),
+                    retn(v("r1")),
+                ]),
+            ),
+            fun(
+                "f2",
+                vec!["c2", "x2"],
+                chain(vec![
+                    call("r2", "f1", vec![v("c2"), v("x2")]),
+                    retn(v("r2")),
+                ]),
+            ),
+        ],
+        vec![
+            alloc("c3", 2),
+            store(v("c3"), 1, v("f2")),
+            store(v("c3"), 0, v("f1")),
+            offset("f2c", v("c3"), 1),
+            offset("f1c", v("c3"), 0),
+            load("t", v("f1c"), 0),
+            call("r3", "t", vec![v("f1c"), i(42)]),
+            retn(v("r3")),
+        ],
+    );
+    assert_eq!(expr1, expr2);
 
-    let expr2 = expr! {
-        letin [
-            fun f2_1 (x1,x2) => {
-                stmt x3 = IAdd, x1, x2;
-                retn x3;
-            };
-            fun f2_2 (c1,x3) => {
-                stmt x4 = Load, c1, 1;
-                call x5 = f2_1 (x3, x4);
-                retn x5;
-            };
-            fun f1_1 (x6) => {
-                stmt c2 = Alloc, 2;
-                stmt Store, c2, 1, x6;
-                stmt Store, c2, 0, f2_2;
-                stmt r1 = Offset, c2, 0;
-                retn r1;
-            };
-            fun f1_2 (c3,x6) => {
-                call r2 = f1_1 (x6);
-                retn r2;
-            }
-        ] {
-            stmt c4 = Alloc, 1;
-            stmt Store, c4, 0, f1_2;
-            stmt f3 = Offset, c4, 0;
-            call f4 = f3 (1);
-            ...
-        }
-    };
-    */
+    // test nested function declaration
+    let expr1 = let_in(
+        vec![fun(
+            "f1",
+            vec!["x"],
+            let_in(
+                vec![fun(
+                    "f2",
+                    vec!["y"],
+                    chain(vec![iadd("r", v("x"), v("y")), retn(v("r"))]),
+                )],
+                vec![retn(v("f2"))],
+            ),
+        )],
+        vec![
+            call("r1", "f1", vec![i(1)]),
+            call("r2", "r1", vec![i(2)]),
+            retn(v("r2")),
+        ],
+    );
+
+    let expr1 = ClosConv::run(expr1);
+    let expr2 = let_in(
+        vec![
+            fun(
+                "f2",
+                vec!["c2", "y2"],
+                chain(vec![
+                    load("x2", v("c2"), 1),
+                    iadd("r2", v("x2"), v("y2")),
+                    retn(v("r2")),
+                ]),
+            ),
+            fun(
+                "f1",
+                vec!["c1", "x1"],
+                chain(vec![
+                    load("f2_", v("c1"), 1),
+                    alloc("c", 2),
+                    store(v("c"), 1, v("x1")),
+                    store(v("c"), 0, v("f2_")),
+                    offset("r1", v("c"), 0),
+                    retn(v("r1")),
+                ]),
+            ),
+        ],
+        vec![
+            alloc("c3", 2),
+            store(v("c3"), 1, v("f2")),
+            store(v("c3"), 0, v("f1")),
+            offset("f1c", v("c3"), 0),
+            load("f1t", v("f1c"), 0),
+            call("f2c", "f1t", vec![v("f1c"), i(1)]),
+            load("f2t", v("f2c"), 0),
+            call("r3", "f2t", vec![v("f2c"), i(2)]),
+            retn(v("r3")),
+        ],
+    );
+    assert_eq!(expr1, expr2);
 }
