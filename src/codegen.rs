@@ -6,7 +6,7 @@ use crate::anf::*;
 use crate::intern::Unique;
 
 pub struct Codegen {
-    bind_vec: Vec<Option<Unique>>,
+    bind_vec: Vec<Unique>,
     text: String,
 }
 
@@ -33,7 +33,7 @@ impl Codegen {
                 for decl in decls {
                     self.visit_decl(decl)?;
                 }
-                self.text.push_str("int main(int argc, char* argv[]) {\n");
+                self.text.push_str("int main(int argc, char* argv[])\n{\n");
                 self.text.push_str(C_SYS_CHECK);
                 self.visit_expr(cont)?;
                 self.text.push_str("}\n");
@@ -51,74 +51,6 @@ impl Codegen {
             MExpr::LetIn { .. } => {
                 panic!("after closure conversion there shouldn't be any nested let-block");
             }
-            MExpr::Stmt { bind, stmt, cont } if stmt.is_branch() => {
-                if let Some(ret_addr) = bind {
-                    write!(self.text, "    void* {ret_addr};\n")?;
-                }
-                self.bind_vec.push(*bind);
-                match stmt {
-                    MStmt::Ifte { arg1, brch1, brch2 } => {
-                        write!(self.text, "    if({arg1}) {{\n")?;
-                        self.visit_expr(brch1)?;
-                        write!(self.text, "    }} else {{\n")?;
-                        self.visit_expr(brch2)?;
-                        write!(self.text, "    }}\n")?;
-                    }
-                    MStmt::Switch { arg1, brchs } => {
-                        write!(self.text, "    switch({arg1}) {{\n")?;
-                        for (i, brch) in brchs.iter().enumerate() {
-                            write!(self.text, "    case {i}:\n")?;
-                            self.visit_expr(brch)?;
-                            write!(self.text, "    break;\n")?;
-                        }
-                        write!(self.text, "    }}\n")?;
-                    }
-                    _ => {
-                        unreachable!()
-                    }
-                }
-                self.bind_vec.pop();
-                self.visit_expr(cont)
-            }
-            MExpr::Stmt { bind, stmt, cont } => {
-                if let Some(x) = bind {
-                    write!(self.text, "    void* {x} = (void*)(")?;
-                } else {
-                    write!(self.text, "    ")?;
-                }
-
-                match stmt {
-                    MStmt::IAdd { arg1, arg2 } => {
-                        write!(self.text, "(int64_t){arg1} + (int64_t){arg2}")?
-                    }
-                    MStmt::ISub { arg1, arg2 } => {
-                        write!(self.text, "(int64_t){arg1} - (int64_t){arg2}")?
-                    }
-                    MStmt::IMul { arg1, arg2 } => {
-                        write!(self.text, "(int64_t){arg1} * (int64_t){arg2}")?
-                    }
-                    MStmt::Move { arg1 } => write!(self.text, "{arg1}")?,
-                    MStmt::Alloc { size } => write!(self.text, "malloc({size} * sizeof(void*))")?,
-                    MStmt::Load { arg1, index } => write!(self.text, "((void**){arg1})[{index}]")?,
-                    MStmt::Store { arg1, index, arg2 } => {
-                        assert!(bind.is_none());
-                        write!(self.text, "((void**){arg1})[{index}] = (void*){arg2}")?
-                    }
-                    MStmt::Offset { arg1, index } => {
-                        write!(self.text, "&((void**){arg1})[{index}]")?
-                    }
-                    MStmt::Ifte { .. } | MStmt::Switch { .. } => {
-                        unreachable!()
-                    }
-                }
-
-                if bind.is_some() {
-                    write!(self.text, ");\n")?;
-                } else {
-                    write!(self.text, ";\n")?;
-                }
-                self.visit_expr(cont)
-            }
             MExpr::Call {
                 bind,
                 func,
@@ -128,26 +60,119 @@ impl Codegen {
                 // temp is used for pointer type coercing
                 let temp = Unique::generate('f');
                 let pars = args.iter().map(|_| "void*").format(", ");
-                write!(self.text, "    void* (*{temp})({pars}) = {func};\n")?;
+                write!(self.text, "void* (*{temp})({pars}) = {func};\n")?;
                 let args = args.iter().map(|arg| format!("(void*){arg}")).format(", ");
-                if let Some(x) = bind {
-                    write!(self.text, "    void* {x} = {temp}({args});\n")?;
-                } else {
-                    write!(self.text, "    {temp}({args});\n")?;
-                }
+                write!(self.text, "void* {bind} = {temp}({args});\n")?;
                 self.visit_expr(cont)
             }
-            MExpr::Retn { atom } => {
+            MExpr::Retn { arg1 } => {
                 match self.bind_vec.last() {
-                    Some(Some(ret_addr)) => {
-                        write!(self.text, "    {ret_addr} = {atom};\n")
+                    Some(ret_addr) => {
+                        write!(self.text, "{ret_addr} = {arg1};\n")
                     }
-                    Some(None) => Ok(()),
                     None => {
                         // toplevel
-                        write!(self.text, "    return {atom};\n")
+                        write!(self.text, "return {arg1};\n")
                     }
                 }
+            }
+            MExpr::UnOp {
+                bind,
+                prim,
+                arg1,
+                cont,
+            } => {
+                let (op, rhs) = match prim {
+                    UnOpPrim::Move => ("", "void*"),
+                    UnOpPrim::INeg => ("-", "int64_t"),
+                };
+                write!(self.text, "void* {bind} = (void*)({op}({rhs})({arg1}));\n")?;
+                self.visit_expr(cont)
+            }
+            MExpr::BinOp {
+                bind,
+                prim,
+                arg1,
+                arg2,
+                cont,
+            } => {
+                let (lhs, op, rhs) = match prim {
+                    BinOpPrim::IAdd => ("int64_t", "+", "int64_t"),
+                    BinOpPrim::ISub => ("int64_t", "-", "int64_t"),
+                    BinOpPrim::IMul => ("int64_t", "*", "int64_t"),
+                };
+                write!(
+                    self.text,
+                    "void* {bind} = (void*)(({lhs})({arg1}){op}({rhs})({arg2}));\n"
+                )?;
+                self.visit_expr(cont)
+            }
+            MExpr::Alloc { bind, size, cont } => {
+                write!(
+                    self.text,
+                    "void* {bind} = malloc({size} * sizeof(void*));\n"
+                )?;
+                self.visit_expr(cont)
+            }
+            MExpr::Store {
+                arg1,
+                index,
+                arg2,
+                cont,
+            } => {
+                write!(self.text, "((void**){arg1})[{index}] = (void*)({arg2});\n")?;
+                self.visit_expr(cont)
+            }
+            MExpr::Load {
+                bind,
+                arg1,
+                index,
+                cont,
+            } => {
+                write!(self.text, "void* {bind} = ((void**){arg1})[{index}];\n")?;
+                self.visit_expr(cont)
+            }
+            MExpr::Offset {
+                bind,
+                arg1,
+                index,
+                cont,
+            } => {
+                write!(self.text, "void* {bind} = &((void**){arg1})[{index}];\n")?;
+                self.visit_expr(cont)
+            }
+            MExpr::Ifte {
+                bind,
+                arg1,
+                brch1,
+                brch2,
+                cont,
+            } => {
+                self.bind_vec.push(*bind);
+                write!(self.text, "if({arg1})\n{{\n")?;
+                self.visit_expr(brch1)?;
+                write!(self.text, "}}\nelse\n{{\n")?;
+                self.visit_expr(brch2)?;
+                write!(self.text, "}}\n")?;
+                self.bind_vec.pop();
+                self.visit_expr(cont)
+            }
+            MExpr::Switch {
+                bind,
+                arg1,
+                brchs,
+                cont,
+            } => {
+                self.bind_vec.push(*bind);
+                write!(self.text, "switch({arg1})\n{{\n")?;
+                for (i, brch) in brchs.iter().enumerate() {
+                    write!(self.text, "case {i}:\n")?;
+                    self.visit_expr(brch)?;
+                    write!(self.text, "break;\n")?;
+                }
+                write!(self.text, "}}\n")?;
+                self.bind_vec.pop();
+                self.visit_expr(cont)
             }
         }
     }
@@ -161,7 +186,7 @@ impl Codegen {
     fn visit_decl(&mut self, decl: &MDecl) -> Result {
         let MDecl { func, pars, body } = decl;
         let pars = pars.iter().map(|par| format!("void* {par}")).format(&", ");
-        write!(self.text, "void* {func}({pars}) {{\n")?;
+        write!(self.text, "void* {func}({pars})\n{{\n")?;
         assert!(self.bind_vec.is_empty());
         self.visit_expr(body)?;
         self.bind_vec.clear();
@@ -182,19 +207,21 @@ reading and editing are not recommanded.
 */
 "#;
 
-pub static C_SYS_CHECK: &'static str = r#"
-    if(sizeof(void*) != 8) {
-        puts("check failed: 'void*' is not 64-bits!");
-        exit(1);
-    }
-    if(sizeof(int64_t) != 8) {
-        puts("check failed: 'int64_t' is not 64-bits!");
-        exit(1);
-    }
-    if(sizeof(double) != 8) {
-        puts("check failed: 'double' is not 64-bits!");
-        exit(1);
-    }
+pub static C_SYS_CHECK: &'static str = r#"if(sizeof(void*) != 8)
+{
+puts("check failed: 'void*' is not 64-bits!");
+exit(1);
+}
+if(sizeof(int64_t) != 8)
+{
+puts("check failed: 'int64_t' is not 64-bits!");
+exit(1);
+}
+if(sizeof(double) != 8)
+{
+puts("check failed: 'double' is not 64-bits!");
+exit(1);
+}
 "#;
 
 #[test]
@@ -216,7 +243,9 @@ f(1)(2)
     let mut rnm = Renamer::new();
     let expr1 = rnm.visit_expr(expr1);
     let expr1 = normalize_expr(&expr1);
+    println!("{expr1}");
     let expr1 = ClosConv::run(expr1);
+    println!("{expr1}");
     let text = Codegen::run(&expr1);
     fs::create_dir_all("./target/output").unwrap();
     let mut output = File::create("./target/output/test_output.c").unwrap();
@@ -227,11 +256,11 @@ f(1)(2)
 #[ignore]
 fn codegen_test() {
     use crate::anf::anf_build::*;
-    let expr1 = letin_block(
+    let expr1 = let_in(
         vec![fun(
             "f1",
             vec!["x1", "x2"],
-            block(vec![iadd("x3", v("x1"), v("x2")), retn(v("x3"))]),
+            chain(vec![iadd("x3", v("x1"), v("x2")), retn(v("x3"))]),
         )],
         vec![call("x7", "x6", vec![v("x5")]), retn(v("x7"))],
     );

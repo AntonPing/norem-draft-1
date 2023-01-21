@@ -13,7 +13,7 @@ pub mod visitor;
 pub mod normalize;
 pub mod simple_opt;
 pub mod clos_conv;
-// pub mod codegen;
+pub mod codegen;
 
 fn main() {
     println!("Hello, world!");
