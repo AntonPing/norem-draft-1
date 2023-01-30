@@ -228,7 +228,7 @@ exit(1);
 #[ignore]
 fn dump_c_code() {
     use crate::clos_conv::ClosConv;
-    use crate::normalize::normalize_expr;
+    use crate::normalize::Normalize;
     use crate::parser::{parse_expr, Parser};
     use crate::renamer::Renamer;
     use std::fs::{self, File};
@@ -242,7 +242,7 @@ f(1)(2)
     let expr1 = parse_expr(&mut par).unwrap();
     let mut rnm = Renamer::new();
     let expr1 = rnm.visit_expr(expr1);
-    let expr1 = normalize_expr(&expr1);
+    let expr1 = Normalize::run(&expr1);
     println!("{expr1}");
     let expr1 = ClosConv::run(expr1);
     println!("{expr1}");

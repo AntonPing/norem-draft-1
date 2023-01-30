@@ -534,7 +534,7 @@ pub fn parse_varient(p: &mut Parser) -> ParseResult<Varient> {
     let pars = p
         .option(|p| {
             p.match_token(TokenKind::LParen)?;
-            let pars = p.sepby1(TokenKind::Semi, parse_type)?;
+            let pars = p.sepby1(TokenKind::Comma, parse_type)?;
             p.match_token(TokenKind::RParen)?;
             Ok(pars)
         })?

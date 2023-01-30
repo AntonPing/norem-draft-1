@@ -1,4 +1,4 @@
-use crate::intern::InternStr;
+use crate::intern::{InternStr, Unique};
 use crate::position::{Span, Spanned};
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
@@ -167,6 +167,37 @@ pub enum Pattern<Ident = InternStr> {
     Wild {
         span: Span,
     },
+}
+
+impl<Ident> Pattern<Ident> {
+    pub fn is_wild_or_var(&self) -> bool {
+        match self {
+            Pattern::Var { .. } | Pattern::Wild { .. } => true,
+            _ => false,
+        }
+    }
+}
+impl Pattern<Unique> {
+    pub fn get_freevars(&self) -> Vec<Unique> {
+        let mut stack = vec![self];
+        let mut vec = Vec::new();
+
+        while let Some(with) = stack.pop() {
+            match with {
+                Pattern::Var { var, .. } => {
+                    if !vec.contains(var) {
+                        vec.push(*var);
+                    }
+                }
+                Pattern::Lit { .. } => {}
+                Pattern::Cons { pars, .. } => {
+                    stack.extend(pars.into_iter());
+                }
+                Pattern::Wild { .. } => {}
+            }
+        }
+        vec
+    }
 }
 
 impl<Ident> Spanned for Pattern<Ident> {
