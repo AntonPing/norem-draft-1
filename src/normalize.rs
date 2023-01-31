@@ -46,6 +46,15 @@ impl Normalize {
         pass.normalize_top(expr)
     }
 
+    fn get_cons_index(&self, cons: &Unique) -> usize {
+        let data = self.cons_env[cons].data;
+        self.data_env[&data]
+            .cons
+            .iter()
+            .position(|cons2| *cons == *cons2)
+            .unwrap()
+    }
+
     fn normalize_top(&mut self, expr: &Expr<Unique>) -> MExpr {
         let bind = Unique::generate('r');
         self.normalize(
@@ -150,6 +159,53 @@ impl Normalize {
                     .cloned()
                     .zip(args.into_iter())
                     .fold(res, |res, (bind, arg)| self.normalize(arg, bind, res));
+                res
+            }
+            Expr::Cons { cons, args, .. } => {
+                // normalize(ci(e1,..,en), hole, ctx) =
+                // normalize(en,xn,
+                //   ...
+                //     normalize(e1,x1,
+                //       normalize(e0,f,
+                //         let m = alloc(n);
+                //         store m[0] = i;
+                //         store m[1] = x1;
+                //         ......
+                //         store m[n] = xn;
+                //         let hole = move(m);
+                //         ctx )...)
+                let m = Unique::generate('m');
+                let argvars: Vec<Unique> = args.iter().map(|_| Unique::generate('x')).collect();
+                let res = MExpr::UnOp {
+                    bind: hole,
+                    prim: UnOpPrim::Move,
+                    arg1: Atom::Var(m),
+                    cont: Box::new(ctx),
+                };
+
+                let res = argvars
+                    .iter()
+                    .enumerate()
+                    .fold(res, |cont, (i, x)| MExpr::Store {
+                        arg1: Atom::Var(m),
+                        index: i + 1,
+                        arg2: Atom::Var(*x),
+                        cont: Box::new(cont),
+                    });
+
+                let res = MExpr::Store {
+                    arg1: Atom::Var(m),
+                    index: 0,
+                    arg2: Atom::Int(self.get_cons_index(cons) as i64),
+                    cont: Box::new(res),
+                };
+
+                let res = argvars
+                    .iter()
+                    .cloned()
+                    .zip(args.into_iter())
+                    .fold(res, |res, (bind, arg)| self.normalize(arg, bind, res));
+
                 res
             }
             Expr::Let {

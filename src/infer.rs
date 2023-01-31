@@ -28,6 +28,7 @@ impl<Ident> TypeCell<Ident> {
             TypeCell::Link(link) => link,
         }
     }
+    #[allow(dead_code)]
     fn unwrap_link_mut(&mut self) -> &mut MonoType<Ident> {
         match self {
             TypeCell::Unbound(_, _) => panic!("failed to unwrap link!"),
@@ -140,6 +141,7 @@ pub struct TypeDecl {}
 
 type InferResult<T> = Result<T, InferError>;
 
+#[allow(dead_code)]
 pub struct Infer {
     val_env: HashMap<Unique, PolyType<Unique>>,
     cons_env: HashMap<Unique, DataCons>,
@@ -405,6 +407,11 @@ impl Infer {
                 self.unify(&func, &func_ty)?;
                 Ok(res)
             }
+            Expr::Cons {
+                cons: _, args: _, ..
+            } => {
+                todo!()
+            }
             Expr::Let {
                 bind, expr, cont, ..
             } => {
@@ -416,11 +423,14 @@ impl Infer {
                 let cont = self.infer_expr(cont)?;
                 Ok(cont)
             }
-            Expr::Case { expr, rules, span } => {
-                let expr = self.infer_expr(expr)?;
+            Expr::Case {
+                expr: _, rules: _, ..
+            } => {
                 todo!()
             }
-            Expr::Blk { decls, cont, span } => {
+            Expr::Blk {
+                decls: _, cont: _, ..
+            } => {
                 todo!()
             }
         }

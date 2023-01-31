@@ -74,8 +74,10 @@ pub enum TokenKind {
     TyChar,
     /// builtin primitives
     Builtin,
-    /// identifier
-    Ident,
+    /// identifier(lowercase)
+    LowerIdent,
+    /// identifier(uppercase)
+    UpperIdent,
     /// wildcard "_", could be something like "_foo"
     Wild,
     /// user-defined operator
@@ -360,10 +362,10 @@ impl<'src> Lexer<'src> {
     }
 
     fn block_comment(&mut self) -> bool {
-        let ch1 = self.next_char();
-        assert_eq!(ch1, Some('/'));
-        let ch2 = self.next_char();
-        assert_eq!(ch2, Some('*'));
+        let ch1 = self.next_char().unwrap();
+        assert_eq!(ch1, '/');
+        let ch2 = self.next_char().unwrap();
+        assert_eq!(ch2, '*');
         loop {
             match self.peek_first() {
                 Some('*') if self.peek_second() == Some('/') => {
@@ -387,10 +389,10 @@ impl<'src> Lexer<'src> {
     }
 
     fn line_comment(&mut self) {
-        let ch1 = self.next_char();
-        assert_eq!(ch1, Some('/'));
-        let ch2 = self.next_char();
-        assert_eq!(ch2, Some('/'));
+        let ch1 = self.next_char().unwrap();
+        assert_eq!(ch1, '/');
+        let ch2 = self.next_char().unwrap();
+        assert_eq!(ch2, '/');
         loop {
             match self.next_char() {
                 Some('\n') | None => {
@@ -403,15 +405,19 @@ impl<'src> Lexer<'src> {
 
     fn ident_or_keyword(&mut self) -> TokenKind {
         let start = self.get_abs();
-        let ch1 = self.next_char();
-        assert!(is_ident_first(ch1.unwrap()));
+        let ch1 = self.next_char().unwrap();
+        assert!(is_ident_first(ch1));
         self.skip_while(|ch| is_ident_body(ch));
         let end = self.get_abs();
         let slice = self.get_slice(start, end);
         if let Some(kwd) = as_keyword(slice) {
             kwd
         } else {
-            TokenKind::Ident
+            if ch1.is_ascii_lowercase() {
+                TokenKind::LowerIdent
+            } else {
+                TokenKind::UpperIdent
+            }
         }
     }
 

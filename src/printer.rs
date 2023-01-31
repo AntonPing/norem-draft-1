@@ -114,6 +114,10 @@ impl<Ident: Display> Display for Expr<Ident> {
                 let args = args.iter().format(&", ");
                 write!(f, "{func}({args})")
             }
+            Expr::Cons { cons, args, .. } => {
+                let args = args.iter().format(&", ");
+                write!(f, "{cons}({args})")
+            }
             Expr::Let {
                 bind, expr, cont, ..
             } => {
