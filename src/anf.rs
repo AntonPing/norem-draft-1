@@ -132,7 +132,8 @@ pub enum MExpr {
     Switch {
         bind: Unique,
         arg1: Atom,
-        brchs: Vec<MExpr>,
+        brchs: Vec<(usize, MExpr)>,
+        dflt: Option<Box<MExpr>>,
         cont: Box<MExpr>,
     },
 }
@@ -389,12 +390,14 @@ impl AlphaEquiv {
                     bind,
                     arg1,
                     brchs,
+                    dflt,
                     cont,
                 },
                 MExpr::Switch {
                     bind: bind_,
                     arg1: arg1_,
                     brchs: brchs_,
+                    dflt: dflt_,
                     cont: cont_,
                 },
             ) => {
@@ -404,7 +407,12 @@ impl AlphaEquiv {
                     && brchs
                         .iter()
                         .zip(brchs_.iter())
-                        .all(|(brch, brch_)| self.eq_expr(brch, brch_))
+                        .all(|((i, brch), (i_, brch_))| i == i_ && self.eq_expr(brch, brch_))
+                    && match (dflt, dflt_) {
+                        (Some(dflt), Some(dflt_)) => self.eq_expr(dflt, dflt_),
+                        (None, None) => true,
+                        _ => false,
+                    }
                     && self.eq_expr(cont, cont_)
             }
             (_, _) => false,
@@ -587,6 +595,7 @@ pub mod anf_build {
                     bind,
                     arg1,
                     brchs,
+                    dflt,
                     cont,
                 } => {
                     assert!(cont.is_retn());
@@ -595,6 +604,7 @@ pub mod anf_build {
                         bind,
                         arg1,
                         brchs,
+                        dflt,
                         cont,
                     }
                 }
@@ -705,15 +715,22 @@ pub mod anf_build {
             cont,
         }
     }
-    pub fn switch(bind: &str, arg1: Atom, brchs: Vec<MExpr>) -> MExpr {
+    pub fn switch(
+        bind: &str,
+        arg1: Atom,
+        brchs: Vec<(usize, MExpr)>,
+        dflt: Option<MExpr>,
+    ) -> MExpr {
         let bind = name(bind);
         let cont = Box::new(MExpr::Retn {
             arg1: Atom::Var(bind),
         });
+        let dflt = dflt.map(|x| Box::new(x));
         MExpr::Switch {
             bind,
             arg1,
             brchs,
+            dflt,
             cont,
         }
     }

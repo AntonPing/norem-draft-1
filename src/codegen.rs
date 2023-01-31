@@ -161,14 +161,19 @@ impl Codegen {
                 bind,
                 arg1,
                 brchs,
+                dflt,
                 cont,
             } => {
                 self.bind_vec.push(*bind);
                 write!(self.text, "switch({arg1})\n{{\n")?;
-                for (i, brch) in brchs.iter().enumerate() {
+                for (i, brch) in brchs.iter() {
                     write!(self.text, "case {i}:\n")?;
                     self.visit_expr(brch)?;
                     write!(self.text, "break;\n")?;
+                }
+                if let Some(dflt) = dflt {
+                    write!(self.text, "default:\n")?;
+                    self.visit_expr(dflt)?;
                 }
                 write!(self.text, "}}\n")?;
                 self.bind_vec.pop();

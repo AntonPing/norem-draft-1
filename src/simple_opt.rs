@@ -264,17 +264,26 @@ impl ConstFold {
                 bind,
                 arg1,
                 brchs,
+                dflt,
                 cont,
             } => {
                 if let Atom::Int(x) = arg1 {
                     self.ret_stack.push((bind, *cont));
-                    let brch = brchs.into_iter().nth(x as usize).unwrap();
-                    return self.visit_expr(brch);
+                    for (i, brch) in brchs.into_iter() {
+                        if i == x as usize {
+                            return self.visit_expr(brch);
+                        }
+                    }
+                    if let Some(dflt) = dflt {
+                        return self.visit_expr(*dflt);
+                    }
+                    panic!("pattern match not exhaustive!");
                 } else {
                     MExpr::Switch {
                         bind,
                         arg1,
                         brchs,
+                        dflt,
                         cont,
                     }
                 }
@@ -558,6 +567,7 @@ impl DeadElim {
                 bind,
                 arg1,
                 brchs,
+                dflt,
                 cont,
             } => {
                 if !self.free_set.contains(&bind) {
@@ -569,6 +579,7 @@ impl DeadElim {
                     bind,
                     arg1,
                     brchs,
+                    dflt,
                     cont,
                 }
             }
@@ -633,15 +644,16 @@ fn const_fold_test() {
             "j",
             i(1),
             vec![
-                chain(vec![iadd("y1", v("x"), i(1)), retn(v("y1"))]),
-                chain(vec![iadd("y2", v("x"), i(2)), retn(v("y2"))]),
-                chain(vec![iadd("y3", v("x"), i(3)), retn(v("y3"))]),
+                (1, chain(vec![iadd("y1", v("x"), i(1)), retn(v("y1"))])),
+                (2, chain(vec![iadd("y2", v("x"), i(2)), retn(v("y2"))])),
+                (3, chain(vec![iadd("y3", v("x"), i(3)), retn(v("y3"))])),
             ],
+            None,
         ),
         retn(v("j")),
     ]);
     let expr1 = ConstFold::run(expr1);
-    let expr2 = retn(i(44));
+    let expr2 = retn(i(43));
     assert_eq!(expr1, expr2);
 
     /*

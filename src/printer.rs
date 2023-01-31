@@ -368,11 +368,15 @@ impl Display for MExpr {
                 bind,
                 arg1,
                 brchs,
+                dflt,
                 cont,
             } => {
                 write!(f, "let {bind} = switch({arg1}) {{{INDT}")?;
-                for (i, brch) in brchs.iter().enumerate() {
+                for (i, brch) in brchs.iter() {
                     write!(f, "{NWLN}case {i}:{INDT}{NWLN}{brch}{DEDT}")?;
+                }
+                if let Some(dflt) = dflt {
+                    write!(f, "{NWLN}default:{INDT}{NWLN}{dflt}{DEDT}")?;
                 }
                 write!(f, "{DEDT}{NWLN}}}{NWLN}{cont}")
             }

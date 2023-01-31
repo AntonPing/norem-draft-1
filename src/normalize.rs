@@ -327,20 +327,28 @@ impl Normalize {
                 ColType::Any => self.match_default(mat, j),
                 ColType::Data(data) => {
                     let cons_set = mat.get_cons_set(j);
+                    let mut exhaustive = true;
                     let brchs = self.data_env[&data]
                         .cons
                         .clone()
                         .into_iter()
-                        .map(|cons| {
+                        .enumerate()
+                        .into_iter()
+                        .flat_map(|(i, cons)| {
                             if cons_set.contains(&cons) {
                                 let arity = self.cons_env[&cons].pars.len();
-                                self.match_specialize(mat, j, cons, arity)
+                                Some((i + 1, self.match_specialize(mat, j, cons, arity)))
                             } else {
-                                self.match_default(mat, j)
+                                exhaustive = false;
+                                None
                             }
                         })
                         .collect();
-
+                    let dflt = if exhaustive {
+                        None
+                    } else {
+                        Some(Box::new(self.match_default(mat, j)))
+                    };
                     let t = Unique::generate('t');
                     MExpr::Load {
                         bind: t,
@@ -350,11 +358,21 @@ impl Normalize {
                             bind: hole,
                             arg1: Atom::Var(t),
                             brchs,
+                            dflt,
                             cont: Box::new(ctx),
                         }),
                     }
                 }
-                ColType::Lit(_) => {
+                ColType::Lit(LitType::Int) => {
+                    todo!()
+                }
+                ColType::Lit(LitType::Real) => {
+                    panic!("pattern match on real numbers are not allowed!");
+                }
+                ColType::Lit(LitType::Bool) => {
+                    todo!()
+                }
+                ColType::Lit(LitType::Char) => {
                     todo!()
                 }
             }

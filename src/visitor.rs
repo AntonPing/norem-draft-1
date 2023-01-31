@@ -114,6 +114,7 @@ impl MExpr {
                 bind,
                 arg1,
                 brchs,
+                dflt,
                 cont,
             } => {
                 let bind = f(bind);
@@ -121,6 +122,7 @@ impl MExpr {
                     bind,
                     arg1,
                     brchs,
+                    dflt,
                     cont,
                 }
             }
@@ -244,6 +246,7 @@ impl MExpr {
                 bind,
                 arg1,
                 brchs,
+                dflt,
                 cont,
             } => {
                 let arg1 = f(arg1);
@@ -251,6 +254,7 @@ impl MExpr {
                     bind,
                     arg1,
                     brchs,
+                    dflt,
                     cont,
                 }
             }
@@ -290,13 +294,16 @@ impl MExpr {
                 bind,
                 arg1,
                 brchs,
+                dflt,
                 cont,
             } => {
-                let brchs = brchs.into_iter().map(|brch| f(brch)).collect();
+                let brchs = brchs.into_iter().map(|(i, brch)| (i, f(brch))).collect();
+                let dflt = dflt.map(|dflt| Box::new(f(*dflt)));
                 MExpr::Switch {
                     bind,
                     arg1,
                     brchs,
+                    dflt,
                     cont,
                 }
             }
@@ -421,6 +428,7 @@ impl MExpr {
                 bind,
                 arg1,
                 brchs,
+                dflt,
                 cont,
             } => {
                 let cont = Box::new(f(*cont));
@@ -428,6 +436,7 @@ impl MExpr {
                     bind,
                     arg1,
                     brchs,
+                    dflt,
                     cont,
                 }
             }
