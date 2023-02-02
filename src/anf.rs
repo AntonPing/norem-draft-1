@@ -119,7 +119,7 @@ pub enum MExpr {
     Offset {
         bind: Unique,
         arg1: Atom,
-        index: usize,
+        index: isize,
         cont: Box<MExpr>,
     },
     Ifte {
@@ -688,7 +688,7 @@ pub mod anf_build {
             cont,
         }
     }
-    pub fn offset(bind: &str, arg1: Atom, index: usize) -> MExpr {
+    pub fn offset(bind: &str, arg1: Atom, index: isize) -> MExpr {
         let bind = name(bind);
         let cont = Box::new(MExpr::Retn {
             arg1: Atom::Var(bind),

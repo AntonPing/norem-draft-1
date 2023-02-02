@@ -1,5 +1,4 @@
-use itertools::Itertools;
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::anf::*;
 use crate::env_map::FreeSet;
@@ -7,16 +6,16 @@ use crate::intern::Unique;
 
 pub struct ClosConv {
     toplevel: Vec<MDecl>,
+    lifted: HashSet<Unique>,
     freevar: FreeSet<Unique>,
-    in_clos: HashMap<Unique, Unique>,
 }
 
 impl ClosConv {
     pub fn new() -> ClosConv {
         ClosConv {
             toplevel: Vec::new(),
+            lifted: HashSet::new(),
             freevar: FreeSet::new(),
-            in_clos: HashMap::new(),
         }
     }
     pub fn run(expr: MExpr) -> MExpr {
@@ -37,14 +36,18 @@ impl ClosConv {
 
     fn visit_arg(&mut self, atom: Atom) -> Atom {
         if let Atom::Var(sym) = atom {
-            self.freevar.insert(sym);
+            if !self.lifted.contains(&sym) {
+                self.freevar.insert(sym);
+            }
         }
         atom
     }
 
     fn visit_decl(&mut self, decl: MDecl) -> MDecl {
         let MDecl { func, pars, body } = decl;
+        self.freevar.enter_scope();
         let body = self.visit_expr(body);
+        self.freevar.leave_scope();
         self.freevar.remove(&func);
         for par in pars.iter() {
             self.freevar.remove(par);
@@ -86,9 +89,6 @@ impl ClosConv {
                 let c = Unique::generate('c');
 
                 self.freevar.enter_scope();
-                for func in &func_names {
-                    self.in_clos.insert(*func, c);
-                }
 
                 // transform function and get their free variable set
                 let decls: Vec<_> = decls
@@ -97,16 +97,12 @@ impl ClosConv {
                     .collect();
 
                 for func in &func_names {
-                    self.in_clos.remove(func);
                     self.freevar.remove(func);
+                    self.lifted.insert(*func);
                 }
 
-                // add function name to the begining of freevar, even if they are not free
-                let freevars: Vec<Unique> = func_names
-                    .iter()
-                    .chain(self.freevar.iter().sorted())
-                    .copied()
-                    .collect();
+                // collect as vector to maintain the order
+                let freevars: Vec<Unique> = self.freevar.iter().cloned().collect();
 
                 self.freevar.leave_scope();
 
@@ -121,23 +117,44 @@ impl ClosConv {
                     pars.insert(0, c);
                     /*
                     foo(x,y,...,z) =
-                        bar;
+                        body_foo;
+                    bar(x,y,...,z) =
+                        body_bar;
                     =======> becomes =======>
                     foo(c,x,y,...,z) =
+                        let foo = offset(c,0);
+                        let bar = offset(c,1);
+                        let v1 = load(c,2);
+                        ...
+                        let vn = load(c,n+1);
+                        bar
+                    bar(c,x,y,...,z) =
+                        let foo = offset(c,-1);
+                        let bar = offset(c,0);
                         let v1 = load(c,1);
                         ...
                         let vn = load(c,n);
                         bar
                     */
-                    let body = freevars.iter().enumerate().skip(func_names.len()).fold(
-                        body,
-                        |cont, (i, x)| MExpr::Load {
+                    let body = freevars
+                        .iter()
+                        .enumerate()
+                        .fold(body, |cont, (i, x)| MExpr::Load {
                             bind: *x,
                             arg1: Atom::Var(c),
-                            index: i - idx,
+                            index: i + func_names.len() - idx,
                             cont: Box::new(cont),
-                        },
-                    );
+                        });
+                    let body =
+                        func_names
+                            .iter()
+                            .enumerate()
+                            .fold(body, |cont, (i, x)| MExpr::Offset {
+                                bind: *x,
+                                arg1: Atom::Var(c),
+                                index: (i as isize - idx as isize),
+                                cont: Box::new(cont),
+                            });
                     let decl = MDecl { func, pars, body };
                     self.toplevel.push(decl);
                 }
@@ -175,25 +192,25 @@ impl ClosConv {
                         .fold(*cont, |expr, (i, f)| MExpr::Offset {
                             bind: *f,
                             arg1: Atom::Var(c),
-                            index: i,
+                            index: i as isize,
                             cont: Box::new(expr),
                         });
 
                 // here is the (block functions) and (free variables) part
-                let cont = freevars
-                    .iter()
-                    .enumerate()
-                    .fold(cont, |expr, (i, x)| MExpr::Store {
+                let cont = func_names.iter().chain(freevars.iter()).enumerate().fold(
+                    cont,
+                    |expr, (i, x)| MExpr::Store {
                         arg1: Atom::Var(c),
                         index: i,
                         arg2: Atom::Var(*x),
                         cont: Box::new(expr),
-                    });
+                    },
+                );
 
                 // here is the (record creation) part
                 let cont = MExpr::Alloc {
                     bind: c,
-                    size: freevars.len(),
+                    size: func_names.len() + freevars.len(),
                     cont: Box::new(cont),
                 };
 
@@ -209,50 +226,29 @@ impl ClosConv {
                 let bind = self.visit_bind(bind);
                 let func = self.visit_arg(func);
                 let args: Vec<_> = args.into_iter().map(|arg| self.visit_arg(arg)).collect();
-                match self.in_clos.get(&func.unwrap_var()).cloned() {
-                    Some(c) => {
-                        /*
-                            let bind = func(a,b,...,z);
-                            cont;
-                            =====> becomes =====>
-                            let bind = func(c,a,b,...,z);
-                            cont;
-                        */
-                        let mut args = args;
-                        args.insert(0, Atom::Var(c));
-                        MExpr::Call {
-                            bind,
-                            func,
-                            args,
-                            cont,
-                        }
-                    }
-                    None => {
-                        /*
-                            let bind = func(a,b,...,z);
-                            cont;
-                            =====> becomes =====>
-                            let f = load(func,0);
-                            let bind = f(func,a,b,...,z);
-                            cont;
-                        */
-                        let f2 = Unique::generate('f');
-                        MExpr::Load {
-                            bind: f2,
-                            arg1: func,
-                            index: 0,
-                            cont: Box::new(MExpr::Call {
-                                bind,
-                                func: Atom::Var(f2),
-                                args: {
-                                    let mut args = args;
-                                    args.insert(0, func);
-                                    args
-                                },
-                                cont,
-                            }),
-                        }
-                    }
+                /*
+                    let bind = func(a,b,...,z);
+                    cont;
+                    =====> becomes =====>
+                    let f = load(func,0);
+                    let bind = f(func,a,b,...,z);
+                    cont;
+                */
+                let f2 = Unique::generate('f');
+                MExpr::Load {
+                    bind: f2,
+                    arg1: func,
+                    index: 0,
+                    cont: Box::new(MExpr::Call {
+                        bind,
+                        func: Atom::Var(f2),
+                        args: {
+                            let mut args = args;
+                            args.insert(0, func);
+                            args
+                        },
+                        cont,
+                    }),
                 }
             }
             MExpr::Retn { arg1 } => {
@@ -290,6 +286,7 @@ fn clos_conv_test() {
             "f1",
             vec!["c1", "x1"],
             chain(vec![
+                offset("_f", v("c1"), 0),
                 load("v2", v("c1"), 1),
                 iadd("r", v("x1"), v("v2")),
                 retn(v("r")),
@@ -331,7 +328,10 @@ fn clos_conv_test() {
                 "f1",
                 vec!["c1", "x1"],
                 chain(vec![
-                    call("r1", "f2", vec![v("c1"), v("x1")]),
+                    offset("f2_1", v("c1"), 1),
+                    offset("f1_1", v("c1"), 0),
+                    load("t1", v("f2_1"), 0),
+                    call("r1", "t1", vec![v("f2_1"), v("x1")]),
                     retn(v("r1")),
                 ]),
             ),
@@ -339,7 +339,10 @@ fn clos_conv_test() {
                 "f2",
                 vec!["c2", "x2"],
                 chain(vec![
-                    call("r2", "f1", vec![v("c2"), v("x2")]),
+                    offset("f2_2", v("c2"), 0),
+                    offset("f1_2", v("c2"), -1),
+                    load("t2", v("f1_2"), 0),
+                    call("r2", "t2", vec![v("f1_2"), v("x2")]),
                     retn(v("r2")),
                 ]),
             ),
@@ -377,7 +380,6 @@ fn clos_conv_test() {
             retn(v("r2")),
         ],
     );
-
     let expr1 = ClosConv::run(expr1);
     let expr2 = let_in(
         vec![
@@ -385,6 +387,7 @@ fn clos_conv_test() {
                 "f2",
                 vec!["c2", "y2"],
                 chain(vec![
+                    offset("_f2", v("c2"), 0),
                     load("x2", v("c2"), 1),
                     iadd("r2", v("x2"), v("y2")),
                     retn(v("r2")),
@@ -394,18 +397,17 @@ fn clos_conv_test() {
                 "f1",
                 vec!["c1", "x1"],
                 chain(vec![
-                    load("f2_", v("c1"), 1),
+                    offset("_f1", v("c1"), 0),
                     alloc("c", 2),
                     store(v("c"), 1, v("x1")),
-                    store(v("c"), 0, v("f2_")),
+                    store(v("c"), 0, v("f2")),
                     offset("r1", v("c"), 0),
                     retn(v("r1")),
                 ]),
             ),
         ],
         vec![
-            alloc("c3", 2),
-            store(v("c3"), 1, v("f2")),
+            alloc("c3", 1),
             store(v("c3"), 0, v("f1")),
             offset("f1c", v("c3"), 0),
             load("f1t", v("f1c"), 0),
