@@ -200,6 +200,14 @@ impl Normalize {
                     cont: Box::new(res),
                 };
 
+                let arity = self.cons_env[cons].pars.len();
+
+                let res = MExpr::Alloc {
+                    bind: m,
+                    size: arity + 1,
+                    cont: Box::new(res),
+                };
+
                 let res = argvars
                     .iter()
                     .cloned()
@@ -393,7 +401,7 @@ impl Normalize {
                         .flat_map(|(i, cons)| {
                             if cons_set.contains(&cons) {
                                 let arity = self.cons_env[&cons].pars.len();
-                                Some((i + 1, self.match_specialize(mat, j, cons, arity)))
+                                Some((i, self.match_specialize(mat, j, cons, arity)))
                             } else {
                                 exhaustive = false;
                                 None
@@ -482,7 +490,7 @@ impl Normalize {
         arity: usize,
     ) -> MExpr {
         let matchee = mat.objs[j];
-        let new_objs: Vec<Unique> = (0..arity).map(|_| Unique::generate('t')).collect();
+        let new_objs: Vec<Unique> = (0..arity).map(|_| Unique::generate('o')).collect();
         let mut bindings: Vec<(Unique, Unique)> = Vec::new();
 
         let (matrix, acts): (Vec<Vec<_>>, _) = mat
@@ -538,8 +546,6 @@ impl Normalize {
         let new_mat = PatnMatrix { objs, matrix, acts };
         let cont = self.compile_match_top(&new_mat);
 
-        // println!("{:?}", &bindings);
-
         let cont = bindings
             .into_iter()
             .fold(cont, |cont, (var, obj)| MExpr::UnOp {
@@ -555,7 +561,7 @@ impl Normalize {
             .fold(cont, |cont, (i, obj)| MExpr::Load {
                 bind: obj,
                 arg1: Atom::Var(matchee),
-                index: i,
+                index: i + 1,
                 cont: Box::new(cont),
             });
 
