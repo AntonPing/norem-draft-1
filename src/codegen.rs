@@ -165,7 +165,8 @@ impl Codegen {
                 cont,
             } => {
                 self.bind_vec.push(*bind);
-                write!(self.text, "switch({arg1})\n{{\n")?;
+                write!(self.text, "void* {bind};\n")?;
+                write!(self.text, "switch((int64_t){arg1})\n{{\n")?;
                 for (i, brch) in brchs.iter() {
                     write!(self.text, "case {i}:\n")?;
                     self.visit_expr(brch)?;
@@ -236,21 +237,44 @@ fn dump_c_code() {
     use crate::normalize::Normalize;
     use crate::parser::{parse_expr, Parser};
     use crate::renamer::Renamer;
+    use crate::simple_opt::{ConstFold, DeadElim};
     use std::fs::{self, File};
     use std::io::Write;
-
     let string = r#"
-let f = fun(x) => fun(y) => @iadd(x,y);
-f(1)(2)
-    "#;
+begin
+    data List[T] =
+    | Cons(T,List[T])
+    | Nil
+    end
+    fun length(lst) => {
+        case lst of
+        | Cons(head,tail) => {
+            @iadd(length(tail),1)
+        }
+        | Nil => { 0 }
+        end
+    }
+in
+    length(Cons(1,Cons(2,Cons(3,Nil))))
+end
+"#;
+
     let mut par = Parser::new(string);
     let expr1 = parse_expr(&mut par).unwrap();
     let mut rnm = Renamer::new();
     let expr1 = rnm.visit_expr(expr1);
     let expr1 = Normalize::run(&expr1);
-    println!("{expr1}");
+    println!("normalize:\n{expr1}");
+    let expr1 = DeadElim::run(expr1);
+    println!("deadelim:\n{expr1}");
+    let expr1 = ConstFold::run(expr1);
+    println!("constfold:\n{expr1}");
     let expr1 = ClosConv::run(expr1);
-    println!("{expr1}");
+    println!("closconv\n{expr1}");
+    let expr1 = DeadElim::run(expr1);
+    println!("deadelim:\n{expr1}");
+    let expr1 = ConstFold::run(expr1);
+    println!("constfold:\n{expr1}");
     let text = Codegen::run(&expr1);
     fs::create_dir_all("./target/output").unwrap();
     let mut output = File::create("./target/output/test_output.c").unwrap();
