@@ -311,7 +311,7 @@ impl MExpr {
         }
     }
 
-    pub fn walk_cont<F: FnMut(MExpr) -> MExpr>(self, mut f: F) -> MExpr {
+    pub fn walk_cont<F: FnOnce(MExpr) -> MExpr>(self, f: F) -> MExpr {
         match self {
             MExpr::LetIn { decls, cont } => {
                 let cont = Box::new(f(*cont));
