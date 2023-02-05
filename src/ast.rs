@@ -1,4 +1,4 @@
-use crate::intern::{InternStr, Unique};
+use crate::intern::Ident;
 use crate::position::{Span, Spanned};
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
@@ -58,7 +58,7 @@ impl Builtin {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Expr<Ident = InternStr> {
+pub enum Expr {
     Lit {
         lit: LitVal,
         span: Span,
@@ -69,43 +69,43 @@ pub enum Expr<Ident = InternStr> {
     },
     Prim {
         prim: Builtin,
-        args: Vec<Expr<Ident>>,
+        args: Vec<Expr>,
         span: Span,
     },
     Fun {
         pars: Vec<Ident>,
-        body: Box<Expr<Ident>>,
+        body: Box<Expr>,
         span: Span,
     },
     App {
-        func: Box<Expr<Ident>>,
-        args: Vec<Expr<Ident>>,
+        func: Box<Expr>,
+        args: Vec<Expr>,
         span: Span,
     },
     Cons {
         cons: Ident,
-        args: Vec<Expr<Ident>>,
+        args: Vec<Expr>,
         span: Span,
     },
     Let {
         bind: Ident,
-        expr: Box<Expr<Ident>>,
-        cont: Box<Expr<Ident>>,
+        expr: Box<Expr>,
+        cont: Box<Expr>,
         span: Span,
     },
     Case {
-        expr: Box<Expr<Ident>>,
-        rules: Vec<Rule<Ident>>,
+        expr: Box<Expr>,
+        rules: Vec<Rule>,
         span: Span,
     },
     Blk {
-        decls: Vec<Decl<Ident>>,
-        cont: Box<Expr<Ident>>,
+        decls: Vec<Decl>,
+        cont: Box<Expr>,
         span: Span,
     },
 }
 
-impl<Ident> Spanned for Expr<Ident> {
+impl Spanned for Expr {
     fn span(&self) -> &Span {
         match self {
             Expr::Lit { span, .. } => span,
@@ -134,7 +134,7 @@ impl<Ident> Spanned for Expr<Ident> {
     }
 }
 
-impl<Ident> Expr<Ident> {
+impl Expr {
     pub fn is_simple(&self) -> bool {
         match self {
             Expr::Lit { .. } => true,
@@ -151,14 +151,14 @@ impl<Ident> Expr<Ident> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Rule<Ident = InternStr> {
-    pub patn: Pattern<Ident>,
-    pub body: Expr<Ident>,
+pub struct Rule {
+    pub patn: Pattern,
+    pub body: Expr,
     pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Pattern<Ident = InternStr> {
+pub enum Pattern {
     Var {
         var: Ident,
         span: Span,
@@ -169,7 +169,7 @@ pub enum Pattern<Ident = InternStr> {
     },
     Cons {
         cons: Ident,
-        pars: Vec<Pattern<Ident>>,
+        pars: Vec<Pattern>,
         span: Span,
     },
     Wild {
@@ -177,7 +177,7 @@ pub enum Pattern<Ident = InternStr> {
     },
 }
 
-impl<Ident> Pattern<Ident> {
+impl Pattern {
     pub fn is_wild_or_var(&self) -> bool {
         match self {
             Pattern::Var { .. } | Pattern::Wild { .. } => true,
@@ -185,8 +185,8 @@ impl<Ident> Pattern<Ident> {
         }
     }
 }
-impl Pattern<Unique> {
-    pub fn get_freevars(&self) -> Vec<Unique> {
+impl Pattern {
+    pub fn get_freevars(&self) -> Vec<Ident> {
         let mut stack = vec![self];
         let mut vec = Vec::new();
 
@@ -208,7 +208,7 @@ impl Pattern<Unique> {
     }
 }
 
-impl<Ident> Spanned for Pattern<Ident> {
+impl Spanned for Pattern {
     fn span(&self) -> &Span {
         match self {
             Pattern::Var { span, .. } => span,
@@ -228,45 +228,45 @@ impl<Ident> Spanned for Pattern<Ident> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Decl<Ident = InternStr> {
+pub enum Decl {
     Func {
         name: Ident,
         pars: Vec<Ident>,
-        body: Box<Expr<Ident>>,
+        body: Box<Expr>,
         span: Span,
     },
     Data {
         name: Ident,
         pars: Vec<Ident>,
-        vars: Vec<Varient<Ident>>,
+        vars: Vec<Varient>,
         span: Span,
     },
     Type {
         name: Ident,
         pars: Vec<Ident>,
-        typ: Type<Ident>,
+        typ: Type,
         span: Span,
     },
 }
 
-impl<Ident> Decl<Ident> {
-    pub fn get_name(&self) -> &Ident {
+impl Decl {
+    pub fn get_name(&self) -> Ident {
         match self {
-            Decl::Func { name, .. } => name,
-            Decl::Data { name, .. } => name,
-            Decl::Type { name, .. } => name,
+            Decl::Func { name, .. } => *name,
+            Decl::Data { name, .. } => *name,
+            Decl::Type { name, .. } => *name,
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Varient<Ident = InternStr> {
+pub struct Varient {
     pub cons: Ident,
-    pub pars: Vec<Type<Ident>>,
+    pub pars: Vec<Type>,
     pub span: Span,
 }
 
-impl<Ident> Spanned for Decl<Ident> {
+impl Spanned for Decl {
     fn span(&self) -> &Span {
         match self {
             Decl::Func { span, .. } => span,
@@ -292,7 +292,7 @@ pub enum LitType {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Type<Ident = InternStr> {
+pub enum Type {
     Lit {
         lit: LitType,
         span: Span,
@@ -302,18 +302,18 @@ pub enum Type<Ident = InternStr> {
         span: Span,
     },
     Fun {
-        pars: Vec<Type<Ident>>,
-        res: Box<Type<Ident>>,
+        pars: Vec<Type>,
+        res: Box<Type>,
         span: Span,
     },
     App {
         cons: Ident,
-        args: Vec<Type<Ident>>,
+        args: Vec<Type>,
         span: Span,
     },
 }
 
-impl<Ident> Spanned for Type<Ident> {
+impl Spanned for Type {
     fn span(&self) -> &Span {
         match self {
             Type::Lit { span, .. } => span,

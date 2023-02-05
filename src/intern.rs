@@ -1,34 +1,11 @@
 use std::collections::HashMap;
 use std::{fmt, ops, sync::Mutex};
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
-pub struct InternStr {
-    index: usize,
+lazy_static::lazy_static! {
+    static ref INTERNER: Mutex<Interner> = Mutex::new(Interner::new());
 }
 
-impl InternStr {
-    pub fn as_dummy(self) -> Unique {
-        Unique {
-            ident: self,
-            index: 0,
-        }
-    }
-    pub fn to_unique(self) -> Unique {
-        unsafe {
-            let index = COUNTER;
-            COUNTER += 1;
-            Unique { ident: self, index }
-        }
-    }
-    pub fn is_uppercase(&self) -> bool {
-        self.as_ref().chars().nth(0).unwrap().is_ascii_uppercase()
-    }
-    pub fn is_lowercase(&self) -> bool {
-        self.as_ref().chars().nth(0).unwrap().is_ascii_lowercase()
-    }
-}
-
-pub struct Interner {
+struct Interner {
     str_to_idx: HashMap<String, usize>,
     idx_to_str: Vec<String>,
 }
@@ -46,30 +23,32 @@ impl Interner {
         }
     }
 
-    pub fn intern<S: Into<String>>(&mut self, s: S) -> InternStr {
+    fn intern<S: Into<String>>(&mut self, s: S) -> InternStr {
         let s: String = s.into();
+        // we assume there is no "empty identifier"
         assert_ne!(s.as_str(), "");
         if let Some(idx) = self.str_to_idx.get(&s) {
-            InternStr { index: *idx }
+            InternStr(*idx)
         } else {
             let idx = self.idx_to_str.len();
             self.idx_to_str.push(s.clone());
             self.str_to_idx.insert(s, idx);
-            InternStr { index: idx }
+            InternStr(idx)
         }
     }
 
-    pub fn get_str<'a>(&'a self, s: InternStr) -> &'a str {
-        &self.idx_to_str[s.index]
+    fn get_str<'a>(&'a self, s: InternStr) -> &'a str {
+        &self.idx_to_str[s.0]
     }
 }
 
-lazy_static::lazy_static! {
-    static ref INTERNER: Mutex<Interner> = Mutex::new(Interner::new());
-}
+#[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub struct InternStr(usize);
 
-pub fn intern<S: Into<String>>(s: S) -> InternStr {
-    INTERNER.lock().unwrap().intern(s)
+impl InternStr {
+    pub fn new<S: Into<String>>(s: S) -> InternStr {
+        INTERNER.lock().unwrap().intern(s)
+    }
 }
 
 impl ops::Deref for InternStr {
@@ -92,7 +71,7 @@ impl AsRef<str> for InternStr {
 
 impl fmt::Debug for InternStr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}({})", self.as_ref(), self.index)
+        write!(f, "{:?}", self.as_ref())
     }
 }
 
@@ -106,48 +85,88 @@ impl fmt::Display for InternStr {
 static mut COUNTER: usize = 1;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Unique {
-    pub ident: InternStr,
+pub struct Ident {
+    pub name: InternStr,
     pub index: usize,
 }
 
-impl fmt::Debug for Unique {
+impl fmt::Debug for Ident {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}_{}", self.ident, self.index)
+        if self.index == 0 {
+            write!(f, "{:?}", self.name)
+        } else {
+            write!(f, "{:?}_{:?}", self.name, self.index)
+        }
     }
 }
 
-impl fmt::Display for Unique {
+impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}_{}", self.ident, self.index)
+        if self.index == 0 {
+            write!(f, "{}", self.name)
+        } else {
+            write!(f, "{}_{}", self.name, self.index)
+        }
     }
 }
 
-impl Unique {
-    pub fn generate(ch: char) -> Unique {
+impl Ident {
+    // a fast single-character variable generator
+    // no need to lookup interner
+    pub fn generate(ch: char) -> Ident {
         assert!(ch.is_ascii_alphabetic() && ch.is_ascii_lowercase());
         let n = ch as u8 - 'a' as u8;
-        let ident = InternStr { index: n as usize };
-        ident.to_unique()
+        let ident = InternStr(n as usize);
+        Ident {
+            name: ident,
+            index: 0,
+        }
+        .uniquify()
     }
 
-    pub fn rename(&self) -> Unique {
-        self.ident.to_unique()
+    pub fn is_dummy(&self) -> bool {
+        self.index == 0
+    }
+
+    pub fn uniquify(&self) -> Ident {
+        unsafe {
+            let index = COUNTER;
+            COUNTER += 1;
+            Ident {
+                name: self.name,
+                index,
+            }
+        }
+    }
+}
+
+impl From<InternStr> for Ident {
+    fn from(str: InternStr) -> Self {
+        Ident {
+            name: str,
+            index: 0,
+        }
+    }
+}
+
+impl From<Ident> for InternStr {
+    fn from(ident: Ident) -> Self {
+        ident.name
     }
 }
 
 #[test]
 fn intern_test() {
-    // test function `intern`
+    // test function InternStr::new()
     let foo1: &str = "foo";
     let foo2: String = "foo".to_string();
     let bar1: &str = "bar";
     let bar2: String = "bar".to_string();
 
-    let s1 = intern(foo1);
-    let s2 = intern(foo2);
-    let s3 = intern(bar1);
-    let s4 = intern(bar2);
+    let s1 = InternStr::new(foo1);
+    let s2 = InternStr::new(foo2);
+    let s3 = InternStr::new(bar1);
+    let s4 = InternStr::new(bar2);
 
     assert_eq!(s1, s2);
     assert_eq!(s3, s4);
@@ -161,26 +180,25 @@ fn intern_test() {
 }
 
 #[test]
-fn unique_test() {
-    // test function `Unique::from_intern`
+fn uniquify_test() {
+    // test function `Ident::uniquify`
     let baz: &str = "baz";
-    let s1 = intern(baz);
-    let u1 = s1.to_unique();
-    let u2 = s1.to_unique();
-    assert_ne!(u1, u2);
-    assert_eq!(u1.ident, u2.ident);
+    let s1 = InternStr::new(baz);
+    let x1 = Ident::from(s1).uniquify();
+    let x2 = Ident::from(s1).uniquify();
+    assert_ne!(x1, x2);
+    assert_eq!(x1.name, x2.name);
 
-    // test function `Unique::generate`
-    let s1 = intern('x');
-    let u1 = s1.to_unique();
-    let u2 = Unique::generate('x');
-    assert_ne!(u1, u2);
-    assert_eq!(u1.ident, u2.ident);
+    // test function `Ident::uniquify`, run twice on the same identifier
+    let s1 = InternStr::new('x');
+    let x1 = Ident::from(s1).uniquify();
+    let x2 = x1.uniquify();
+    assert_ne!(x1, x2);
+    assert_eq!(x1.name, x2.name);
 
-    // test function `Unique::rename`
-    let s1 = intern('x');
-    let u1 = s1.to_unique();
-    let u2 = u1.rename();
-    assert_ne!(u1, u2);
-    assert_eq!(u1.ident, u2.ident);
+    // test function `Ident::generate`
+    let x1 = Ident::generate('x');
+    let x2 = Ident::generate('x');
+    assert_ne!(x1, x2);
+    assert_eq!(x1.name, x2.name);
 }

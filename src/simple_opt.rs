@@ -1,15 +1,15 @@
 use crate::anf::*;
 use crate::env_map::*;
-use crate::intern::Unique;
+use crate::intern::Ident;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
 pub struct ConstFold {
-    atom_map: EnvMap<Unique, Atom>,
-    alloc_map: EnvMap<Unique, usize>,
-    store_map: EnvMap<(Unique, usize), Atom>,
-    offset_map: EnvMap<Unique, (Unique, usize)>,
-    ret_stack: Vec<(Unique, MExpr)>,
+    atom_map: EnvMap<Ident, Atom>,
+    alloc_map: EnvMap<Ident, usize>,
+    store_map: EnvMap<(Ident, usize), Atom>,
+    offset_map: EnvMap<Ident, (Ident, usize)>,
+    ret_stack: Vec<(Ident, MExpr)>,
 }
 
 impl ConstFold {
@@ -27,7 +27,7 @@ impl ConstFold {
         }
     }
     #[allow(dead_code)]
-    fn get_real_addr(&self, var: Unique, index: usize) -> (Unique, usize) {
+    fn get_real_addr(&self, var: Ident, index: usize) -> (Ident, usize) {
         self.offset_map
             .get(&var)
             .map(|(var2, index2)| {
@@ -333,8 +333,8 @@ where
 */
 
 pub struct DeadElim {
-    free_set: FreeSet<Unique>,
-    load_map: EnvMap<Unique, HashSet<usize>>,
+    free_set: FreeSet<Ident>,
+    load_map: EnvMap<Ident, HashSet<usize>>,
     ret_used: Vec<bool>,
 }
 
@@ -368,15 +368,15 @@ impl DeadElim {
         let expr = expr.walk_cont(|cont| self.visit_expr(cont));
         let expr = match expr {
             MExpr::LetIn { decls, cont } => {
-                let used: HashSet<Unique> = decls
+                let used: HashSet<Ident> = decls
                     .iter()
                     .map(|decl| decl.func)
                     .filter(|func| self.free_set.contains(func))
                     .collect();
 
-                let names: HashSet<Unique> = decls.iter().map(|decl| decl.func).collect();
+                let names: HashSet<Ident> = decls.iter().map(|decl| decl.func).collect();
 
-                let (decls, sets): (Vec<MDecl>, Vec<HashSet<Unique>>) = decls
+                let (decls, sets): (Vec<MDecl>, Vec<HashSet<Ident>>) = decls
                     .into_iter()
                     .map(|decl| {
                         let MDecl { func, pars, body } = decl;
@@ -393,7 +393,7 @@ impl DeadElim {
                     })
                     .unzip();
 
-                let graph: HashMap<Unique, HashSet<Unique>> = decls
+                let graph: HashMap<Ident, HashSet<Ident>> = decls
                     .iter()
                     .map(|decl| decl.func)
                     .zip(sets.into_iter())
@@ -607,11 +607,11 @@ impl DeadElim {
 }
 
 struct LinearInlineScan {
-    // map a unique variable to (n,m)
+    // map a unique identifier to (n,m)
     // where n is occur times, and m is call-site occur times
     // n >= m always
-    occur: HashMap<Unique, (usize, usize)>,
-    set: HashSet<Unique>,
+    occur: HashMap<Ident, (usize, usize)>,
+    set: HashSet<Ident>,
 }
 
 impl LinearInlineScan {
@@ -621,7 +621,7 @@ impl LinearInlineScan {
             set: HashSet::new(),
         }
     }
-    fn run(expr: MExpr) -> (MExpr, HashSet<Unique>) {
+    fn run(expr: MExpr) -> (MExpr, HashSet<Ident>) {
         let mut pass = LinearInlineScan::new();
         let res = pass.visit_expr(expr);
         (res, pass.set)
@@ -684,7 +684,7 @@ impl LinearInlineScan {
     }
 }
 
-fn concat(expr: MExpr, bind: Unique, cont: MExpr) -> MExpr {
+fn concat(expr: MExpr, bind: Ident, cont: MExpr) -> MExpr {
     match expr {
         MExpr::Retn { arg1 } => MExpr::UnOp {
             bind,
@@ -696,13 +696,7 @@ fn concat(expr: MExpr, bind: Unique, cont: MExpr) -> MExpr {
     }
 }
 
-fn inline_call(
-    decl: MDecl,
-    bind: Unique,
-    func: Unique,
-    args: Vec<Atom>,
-    cont: Box<MExpr>,
-) -> MExpr {
+fn inline_call(decl: MDecl, bind: Ident, func: Ident, args: Vec<Atom>, cont: Box<MExpr>) -> MExpr {
     let MDecl {
         func: func2,
         pars,
@@ -723,18 +717,18 @@ fn inline_call(
 }
 
 struct InlinePerform {
-    linear_set: HashSet<Unique>,
-    inline_map: HashMap<Unique, MDecl>,
+    linear_set: HashSet<Ident>,
+    inline_map: HashMap<Ident, MDecl>,
 }
 
 impl InlinePerform {
-    fn new(linear_set: HashSet<Unique>) -> InlinePerform {
+    fn new(linear_set: HashSet<Ident>) -> InlinePerform {
         InlinePerform {
             linear_set,
             inline_map: HashMap::new(),
         }
     }
-    fn run(expr: MExpr, linear_set: HashSet<Unique>) -> MExpr {
+    fn run(expr: MExpr, linear_set: HashSet<Ident>) -> MExpr {
         let mut pass = InlinePerform::new(linear_set);
         assert!(pass.inline_map.is_empty());
         pass.visit_expr(expr)

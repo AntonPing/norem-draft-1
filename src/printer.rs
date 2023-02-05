@@ -93,7 +93,7 @@ impl Display for Builtin {
     }
 }
 
-impl<Ident: Display> Display for Expr<Ident> {
+impl Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Expr::Lit { lit, .. } => {
@@ -147,7 +147,7 @@ impl<Ident: Display> Display for Expr<Ident> {
     }
 }
 
-impl<Ident: Display> Display for Pattern<Ident> {
+impl Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Pattern::Var { var, .. } => {
@@ -171,7 +171,7 @@ impl<Ident: Display> Display for Pattern<Ident> {
     }
 }
 
-impl<Ident: Display> Display for Rule<Ident> {
+impl Display for Rule {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Rule { patn, body, .. } = self;
         if body.is_simple() {
@@ -182,7 +182,7 @@ impl<Ident: Display> Display for Rule<Ident> {
     }
 }
 
-impl<Ident: Display> Display for Varient<Ident> {
+impl Display for Varient {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Varient { cons, pars, .. } = self;
         if pars.is_empty() {
@@ -194,7 +194,7 @@ impl<Ident: Display> Display for Varient<Ident> {
     }
 }
 
-impl<Ident: Display> Display for Decl<Ident> {
+impl Display for Decl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Decl::Func {
@@ -237,7 +237,7 @@ impl<Ident: Display> Display for Decl<Ident> {
     }
 }
 
-impl<Ident: Display> Display for Type<Ident> {
+impl Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Type::Lit { lit, .. } => {

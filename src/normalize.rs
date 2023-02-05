@@ -1,36 +1,36 @@
 use crate::anf::*;
 use crate::ast::*;
-use crate::intern::Unique;
+use crate::intern::Ident;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 #[allow(dead_code)]
 pub struct DataCons {
-    cons: Unique,
-    pars: Vec<Type<Unique>>,
+    cons: Ident,
+    pars: Vec<Type>,
     // belongs to which DataDecl
-    data: Unique,
+    data: Ident,
 }
 
 #[allow(dead_code)]
 pub struct DataDecl {
-    name: Unique,
-    pars: Vec<Unique>,
+    name: Ident,
+    pars: Vec<Ident>,
     // reference to DataCons
-    cons: Vec<Unique>,
+    cons: Vec<Ident>,
 }
 
 #[allow(dead_code)]
 pub struct TypeDecl {
-    name: Unique,
-    pars: Vec<Unique>,
-    typ: Type<Unique>,
+    name: Ident,
+    pars: Vec<Ident>,
+    typ: Type,
 }
 
 pub struct Normalize {
-    cons_env: HashMap<Unique, DataCons>,
-    data_env: HashMap<Unique, DataDecl>,
-    type_env: HashMap<Unique, TypeDecl>,
+    cons_env: HashMap<Ident, DataCons>,
+    data_env: HashMap<Ident, DataDecl>,
+    type_env: HashMap<Ident, TypeDecl>,
 }
 
 impl Normalize {
@@ -41,12 +41,12 @@ impl Normalize {
             type_env: HashMap::new(),
         }
     }
-    pub fn run(expr: &Expr<Unique>) -> MExpr {
+    pub fn run(expr: &Expr) -> MExpr {
         let mut pass = Normalize::new();
         pass.normalize_top(expr)
     }
 
-    fn get_cons_index(&self, cons: &Unique) -> usize {
+    fn get_cons_index(&self, cons: &Ident) -> usize {
         let data = self.cons_env[cons].data;
         self.data_env[&data]
             .cons
@@ -55,8 +55,8 @@ impl Normalize {
             .unwrap()
     }
 
-    fn normalize_top(&mut self, expr: &Expr<Unique>) -> MExpr {
-        let bind = Unique::generate('r');
+    fn normalize_top(&mut self, expr: &Expr) -> MExpr {
+        let bind = Ident::generate('r');
         self.normalize(
             expr,
             bind,
@@ -66,16 +66,16 @@ impl Normalize {
         )
     }
 
-    // translate from Expr<Unique> to MExpr, basically a lowering pass
+    // translate from Expr to MExpr, basically a lowering pass
     // order of evaluation for function arguments: from right to left
-    fn normalize(&mut self, expr: &Expr<Unique>, hole: Unique, ctx: MExpr) -> MExpr {
+    fn normalize(&mut self, expr: &Expr, hole: Ident, ctx: MExpr) -> MExpr {
         match expr {
             Expr::Lit { lit, .. } => subst(ctx, hole, (*lit).into()),
             Expr::Var { var, .. } => subst(ctx, hole, Atom::Var(*var)),
             Expr::Prim { prim, args, .. } => {
                 // normalize(@iadd(e1,e2), hole, ctx) =
                 // normalize(e2,x2,normalize(e1,x1, let hole = iadd(x1,x2) in ctx))
-                let tempvars: Vec<Unique> = args.iter().map(|_| Unique::generate('x')).collect();
+                let tempvars: Vec<Ident> = args.iter().map(|_| Ident::generate('x')).collect();
 
                 pub enum OpPrim {
                     Unary(UnOpPrim),
@@ -128,7 +128,7 @@ impl Normalize {
             Expr::Fun { pars, body, .. } => {
                 // normalize(fun(x,y) => e, hole, ctx) =
                 // let f(x,y) = normalize_top(e) in ctx[hole:=f]
-                let funcvar = Unique::generate('f');
+                let funcvar = Ident::generate('f');
                 MExpr::LetIn {
                     decls: vec![MDecl {
                         func: funcvar,
@@ -145,8 +145,8 @@ impl Normalize {
                 //     normalize(e1,x1,
                 //       normalize(e0,f,
                 //         let hole = f(x1,...,xn) in ctx))...)
-                let funcvar = Unique::generate('f');
-                let argvars: Vec<Unique> = args.iter().map(|_| Unique::generate('x')).collect();
+                let funcvar = Ident::generate('f');
+                let argvars: Vec<Ident> = args.iter().map(|_| Ident::generate('x')).collect();
                 let res = MExpr::Call {
                     bind: hole,
                     func: Atom::Var(funcvar),
@@ -174,8 +174,8 @@ impl Normalize {
                 //         store m[n] = xn;
                 //         let hole = move(m);
                 //         ctx )...)
-                let m = Unique::generate('m');
-                let argvars: Vec<Unique> = args.iter().map(|_| Unique::generate('x')).collect();
+                let m = Ident::generate('m');
+                let argvars: Vec<Ident> = args.iter().map(|_| Ident::generate('x')).collect();
                 let res = MExpr::UnOp {
                     bind: hole,
                     prim: UnOpPrim::Move,
@@ -252,7 +252,7 @@ impl Normalize {
                         end
                     )
                 */
-                let etop = Unique::generate('o');
+                let etop = Ident::generate('o');
 
                 let mut decls: Vec<MDecl> = Vec::new();
 
@@ -260,7 +260,7 @@ impl Normalize {
                     .into_iter()
                     .map(|rule| {
                         let Rule { patn, body, .. } = rule;
-                        let func = Unique::generate('a');
+                        let func = Ident::generate('a');
                         let pars = patn.get_freevars();
                         let args = pars.iter().map(|var| Atom::Var(*var)).collect();
 
@@ -361,11 +361,11 @@ impl Normalize {
     }
 
     pub fn compile_match_top(&mut self, mat: &PatnMatrix) -> MExpr {
-        let r = Unique::generate('r');
+        let r = Ident::generate('r');
         self.compile_match(mat, r, MExpr::Retn { arg1: Atom::Var(r) })
     }
 
-    pub fn compile_match(&mut self, mat: &PatnMatrix, hole: Unique, ctx: MExpr) -> MExpr {
+    pub fn compile_match(&mut self, mat: &PatnMatrix, hole: Ident, ctx: MExpr) -> MExpr {
         if mat.is_empty() {
             panic!("pattern match not exhaustive!")
         } else if mat.first_row_aways_match() {
@@ -413,7 +413,7 @@ impl Normalize {
                     } else {
                         Some(Box::new(self.match_default(mat, j)))
                     };
-                    let t = Unique::generate('t');
+                    let t = Ident::generate('t');
                     MExpr::Load {
                         bind: t,
                         arg1: Atom::Var(mat.objs[j]),
@@ -486,12 +486,12 @@ impl Normalize {
         &mut self,
         mat: &PatnMatrix,
         j: usize,
-        cons: Unique,
+        cons: Ident,
         arity: usize,
     ) -> MExpr {
         let matchee = mat.objs[j];
-        let new_objs: Vec<Unique> = (0..arity).map(|_| Unique::generate('o')).collect();
-        let mut bindings: Vec<(Unique, Unique)> = Vec::new();
+        let new_objs: Vec<Ident> = (0..arity).map(|_| Ident::generate('o')).collect();
+        let mut bindings: Vec<(Ident, Ident)> = Vec::new();
 
         let (matrix, acts): (Vec<Vec<_>>, _) = mat
             .matrix
@@ -570,7 +570,7 @@ impl Normalize {
 
     pub fn match_default(&mut self, mat: &PatnMatrix, j: usize) -> MExpr {
         let matchee = mat.objs[j];
-        let mut bindings: Vec<(Unique, Unique)> = Vec::new();
+        let mut bindings: Vec<(Ident, Ident)> = Vec::new();
 
         let (matrix, acts): (Vec<Vec<_>>, _) = mat
             .matrix
@@ -621,7 +621,7 @@ impl Normalize {
     }
 }
 
-pub fn subst(expr: MExpr, hole: Unique, atom: Atom) -> MExpr {
+pub fn subst(expr: MExpr, hole: Ident, atom: Atom) -> MExpr {
     // subst(expr,hole,atom) ~=~ let hole = move(atom); expr
     // it will be substituted in constant-fold pass anyway
     MExpr::UnOp {
@@ -635,15 +635,15 @@ pub fn subst(expr: MExpr, hole: Unique, atom: Atom) -> MExpr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ColType {
     Any,
-    Data(Unique),
+    Data(Ident),
     Lit(LitType),
 }
 
 // assume that more than one row and more than one column
 #[derive(Debug, Clone)]
 pub struct PatnMatrix {
-    objs: Vec<Unique>,
-    matrix: Vec<Vec<Pattern<Unique>>>,
+    objs: Vec<Ident>,
+    matrix: Vec<Vec<Pattern>>,
     acts: Vec<MExpr>,
 }
 
@@ -671,7 +671,7 @@ impl PatnMatrix {
         self.matrix[0].iter().all(|p| p.is_wild_or_var())
     }
 
-    fn get_cons_set(&self, j: usize) -> HashSet<Unique> {
+    fn get_cons_set(&self, j: usize) -> HashSet<Ident> {
         let mut set = HashSet::new();
         for row in self.matrix.iter() {
             match &row[j] {

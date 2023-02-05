@@ -3,10 +3,10 @@ use std::fmt::Result;
 use std::fmt::Write;
 
 use crate::anf::*;
-use crate::intern::Unique;
+use crate::intern::Ident;
 
 pub struct Codegen {
-    bind_vec: Vec<Unique>,
+    bind_vec: Vec<Ident>,
     text: String,
 }
 
@@ -58,7 +58,7 @@ impl Codegen {
                 cont,
             } => {
                 // temp is used for pointer type coercing
-                let temp = Unique::generate('f');
+                let temp = Ident::generate('f');
                 let pars = args.iter().map(|_| "void*").format(", ");
                 write!(self.text, "void* (*{temp})({pars}) = {func};\n")?;
                 let args = args.iter().map(|arg| format!("(void*){arg}")).format(", ");
@@ -237,6 +237,7 @@ fn dump_c_code() {
     use crate::normalize::Normalize;
     use crate::parser::{parse_expr, Parser};
     use crate::renamer::Renamer;
+    use crate::simple_opt::LinearInline;
     use crate::simple_opt::{ConstFold, DeadElim};
     use std::fs::{self, File};
     use std::io::Write;
@@ -255,7 +256,7 @@ begin
         end
     }
 in
-    length(Cons(1,Cons(2,Cons(3,Nil))))
+    length(Cons(1,Cons(2,Cons(3,Cons(4,Nil)))))
 end
 "#;
 
@@ -266,15 +267,19 @@ end
     let expr1 = Normalize::run(&expr1);
     println!("normalize:\n{expr1}");
     let expr1 = DeadElim::run(expr1);
-    println!("deadelim:\n{expr1}");
+    println!("dead-elim:\n{expr1}");
     let expr1 = ConstFold::run(expr1);
-    println!("constfold:\n{expr1}");
+    println!("const-fold:\n{expr1}");
+    let expr1 = LinearInline::run(expr1);
+    println!("linear-inline:\n{expr1}");
     let expr1 = ClosConv::run(expr1);
-    println!("closconv\n{expr1}");
+    println!("clos-conv\n{expr1}");
     let expr1 = DeadElim::run(expr1);
-    println!("deadelim:\n{expr1}");
+    println!("dead-elim:\n{expr1}");
     let expr1 = ConstFold::run(expr1);
-    println!("constfold:\n{expr1}");
+    println!("const-fold:\n{expr1}");
+    let expr1 = LinearInline::run(expr1);
+    println!("linear-inline:\n{expr1}");
     let text = Codegen::run(&expr1);
     fs::create_dir_all("./target/output").unwrap();
     let mut output = File::create("./target/output/test_output.c").unwrap();

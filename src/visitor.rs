@@ -1,9 +1,9 @@
 use crate::anf::*;
 use crate::env_map::EnvMap;
-use crate::intern::Unique;
+use crate::intern::Ident;
 
 impl MExpr {
-    pub fn walk_bind<F: FnMut(Unique) -> Unique>(self, mut f: F) -> MExpr {
+    pub fn walk_bind<F: FnMut(Ident) -> Ident>(self, mut f: F) -> MExpr {
         match self {
             MExpr::LetIn { decls, cont } => MExpr::LetIn { decls, cont },
             MExpr::UnOp {
@@ -453,7 +453,7 @@ impl MDecl {
 }
 
 pub struct Renamer {
-    map: EnvMap<Unique, Unique>,
+    map: EnvMap<Ident, Ident>,
 }
 
 impl Renamer {
@@ -466,8 +466,8 @@ impl Renamer {
         Renamer { map: EnvMap::new() }
     }
 
-    fn visit_bind(&mut self, bind: Unique) -> Unique {
-        let new = bind.rename();
+    fn visit_bind(&mut self, bind: Ident) -> Ident {
+        let new = bind.uniquify();
         self.map.insert(bind, new);
         new
     }

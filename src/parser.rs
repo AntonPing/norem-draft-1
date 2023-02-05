@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::intern::{intern, InternStr};
+use crate::intern::{Ident, InternStr};
 use crate::lexer::{Lexer, Token, TokenKind};
 use crate::position::{Position, Span, Spanned};
 
@@ -159,21 +159,21 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn match_lower_ident(&mut self) -> ParseResult<InternStr> {
+    fn match_lower_ident(&mut self) -> ParseResult<Ident> {
         if self.peek_kind() == TokenKind::LowerIdent {
             let slice = self.peek_slice();
             self.next_token();
-            Ok(intern(slice))
+            Ok(Ident::from(InternStr::new(slice)))
         } else {
             Err(self.err_unexpected(TokenKind::LowerIdent))
         }
     }
 
-    fn match_upper_ident(&mut self) -> ParseResult<InternStr> {
+    fn match_upper_ident(&mut self) -> ParseResult<Ident> {
         if self.peek_kind() == TokenKind::UpperIdent {
             let slice = self.peek_slice();
             self.next_token();
-            Ok(intern(slice))
+            Ok(Ident::from(InternStr::new(slice)))
         } else {
             Err(self.err_unexpected(TokenKind::UpperIdent))
         }
@@ -199,7 +199,7 @@ impl<'src> Parser<'src> {
                 "@bnot" => Builtin::BNot,
                 _ => {
                     let span = *self.peek_span();
-                    let err = ParseError::UnknownBuiltin(span, intern(slice));
+                    let err = ParseError::UnknownBuiltin(span, InternStr::new(slice));
                     return Err(err);
                 }
             };

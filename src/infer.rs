@@ -10,26 +10,26 @@ use crate::ast::*;
 use crate::intern::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TypeCell<Ident> {
+pub enum TypeCell {
     Unbound(Ident, usize),
-    Link(MonoType<Ident>),
+    Link(MonoType),
 }
 
-impl<Ident> TypeCell<Ident> {
+impl TypeCell {
     fn is_bound(&self) -> bool {
         match self {
             TypeCell::Unbound(_, _) => false,
             TypeCell::Link(_) => true,
         }
     }
-    fn unwrap_link(&self) -> &MonoType<Ident> {
+    fn unwrap_link(&self) -> &MonoType {
         match self {
             TypeCell::Unbound(_, _) => panic!("failed to unwrap link!"),
             TypeCell::Link(link) => link,
         }
     }
     #[allow(dead_code)]
-    fn unwrap_link_mut(&mut self) -> &mut MonoType<Ident> {
+    fn unwrap_link_mut(&mut self) -> &mut MonoType {
         match self {
             TypeCell::Unbound(_, _) => panic!("failed to unwrap link!"),
             TypeCell::Link(link) => link,
@@ -42,21 +42,21 @@ impl<Ident> TypeCell<Ident> {
         }
     }
 }
-type MonoType<Ident> = TypeBase<Ident, Infallible>;
-type PolyType<Ident> = TypeBase<Ident, ()>;
+type MonoType = TypeBase<Infallible>;
+type PolyType = TypeBase<()>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TypeBase<Ident, P> {
+pub enum TypeBase<P> {
     Lit(LitType),
     // Var can only appears in PolyType
     Var(Ident, P),
     // mutable cell for constant-time unification
-    Cell(Rc<RefCell<TypeCell<Ident>>>),
-    Fun(Vec<TypeBase<Ident, P>>, Box<TypeBase<Ident, P>>),
-    App(Ident, Vec<TypeBase<Ident, P>>),
+    Cell(Rc<RefCell<TypeCell>>),
+    Fun(Vec<TypeBase<P>>, Box<TypeBase<P>>),
+    App(Ident, Vec<TypeBase<P>>),
 }
 
-impl<Ident, P> TypeBase<Ident, P> {
+impl<P> TypeBase<P> {
     fn uniop(lit: LitType) -> Self {
         TypeBase::Fun(vec![TypeBase::Lit(lit)], Box::new(TypeBase::Lit(lit)))
     }
@@ -85,7 +85,7 @@ impl<Ident, P> TypeBase<Ident, P> {
     }
 }
 
-impl<Ident: Display, P> Display for TypeBase<Ident, P> {
+impl<P> Display for TypeBase<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             TypeBase::Lit(lit) => write!(f, "{lit}"),
@@ -106,9 +106,9 @@ impl<Ident: Display, P> Display for TypeBase<Ident, P> {
     }
 }
 
-impl<Ident> From<MonoType<Ident>> for PolyType<Ident> {
+impl From<MonoType> for PolyType {
     // todo: maybe use unsafe cast?
-    fn from(mty: MonoType<Ident>) -> Self {
+    fn from(mty: MonoType) -> Self {
         match mty {
             TypeBase::Lit(lit) => TypeBase::Lit(lit),
             TypeBase::Var(_, _) => unreachable!(),
@@ -143,10 +143,10 @@ type InferResult<T> = Result<T, InferError>;
 
 #[allow(dead_code)]
 pub struct Infer {
-    val_env: HashMap<Unique, PolyType<Unique>>,
-    cons_env: HashMap<Unique, DataCons>,
-    data_env: HashMap<Unique, DataDecl>,
-    type_env: HashMap<Unique, TypeDecl>,
+    val_env: HashMap<Ident, PolyType>,
+    cons_env: HashMap<Ident, DataCons>,
+    data_env: HashMap<Ident, DataDecl>,
+    type_env: HashMap<Ident, TypeDecl>,
     level: usize,
     error: Vec<InferError>,
 }
@@ -162,16 +162,12 @@ impl Infer {
             error: Vec::new(),
         }
     }
-    fn new_cell(&self) -> Rc<RefCell<TypeCell<Unique>>> {
-        let name = Unique::generate('t'); // self.name_pool[19] = intern("t");
+    fn new_cell(&self) -> Rc<RefCell<TypeCell>> {
+        let name = Ident::generate('t');
         Rc::new(RefCell::new(TypeCell::Unbound(name, self.level)))
     }
 
-    fn assign(
-        &self,
-        cell: &Rc<RefCell<TypeCell<Unique>>>,
-        ty: &MonoType<Unique>,
-    ) -> InferResult<()> {
+    fn assign(&self, cell: &Rc<RefCell<TypeCell>>, ty: &MonoType) -> InferResult<()> {
         if cell.borrow().is_bound() {
             self.unify(ty, cell.borrow().unwrap_link())
         } else {
@@ -181,11 +177,7 @@ impl Infer {
         }
     }
 
-    fn update_level(
-        &self,
-        cell: &Rc<RefCell<TypeCell<Unique>>>,
-        ty: &MonoType<Unique>,
-    ) -> InferResult<()> {
+    fn update_level(&self, cell: &Rc<RefCell<TypeCell>>, ty: &MonoType) -> InferResult<()> {
         assert!(!cell.borrow().is_bound());
         match ty {
             TypeBase::Lit(_lit) => Ok(()),
@@ -220,7 +212,7 @@ impl Infer {
         }
     }
 
-    fn unify(&self, ty1: &MonoType<Unique>, ty2: &MonoType<Unique>) -> InferResult<()> {
+    fn unify(&self, ty1: &MonoType, ty2: &MonoType) -> InferResult<()> {
         // println!("unify {:?} ~ {:?}",ty1,ty2);
         match (&ty1, &ty2) {
             (TypeBase::Lit(a), TypeBase::Lit(b)) => {
@@ -236,8 +228,7 @@ impl Infer {
             (TypeBase::Cell(x), TypeBase::Cell(y)) if Rc::ptr_eq(x, y) => {
                 Ok(()) // do nothing
             }
-            (TypeBase::Cell(cell), _) => self.assign(cell, ty2),
-            (_, TypeBase::Cell(cell)) => self.assign(cell, ty1),
+            (TypeBase::Cell(cell), ty) | (ty, TypeBase::Cell(cell)) => self.assign(cell, ty),
             (TypeBase::Fun(pars_a, res_a), TypeBase::Fun(pars_b, res_b)) => {
                 if pars_a.len() != pars_b.len() {
                     return Err(InferError::CantUnifyDiffArgLens);
@@ -262,16 +253,12 @@ impl Infer {
         }
     }
 
-    fn generalize(&self, mty: &MonoType<Unique>) -> PolyType<Unique> {
+    fn generalize(&self, mty: &MonoType) -> PolyType {
         let mut map = HashMap::new();
         self.generalize_aux(&mut map, &mty)
     }
 
-    fn generalize_aux(
-        &self,
-        map: &mut HashMap<Unique, Unique>,
-        mty: &MonoType<Unique>,
-    ) -> PolyType<Unique> {
+    fn generalize_aux(&self, map: &mut HashMap<Ident, Ident>, mty: &MonoType) -> PolyType {
         match mty {
             TypeBase::Lit(lit) => TypeBase::Lit(*lit),
             TypeBase::Var(_, _) => {
@@ -287,7 +274,7 @@ impl Infer {
                                 // todo: more than 26 type parameters?!!
                                 assert!(map.len() < 26);
                                 let n = map.len() as u8 + 'a' as u8;
-                                let var = Unique::generate(n as char);
+                                let var = Ident::generate(n as char);
                                 map.insert(*name, var);
                                 TypeBase::Var(var, ())
                             }
@@ -316,16 +303,16 @@ impl Infer {
         }
     }
 
-    fn instantiate(&self, pty: &PolyType<Unique>) -> MonoType<Unique> {
+    fn instantiate(&self, pty: &PolyType) -> MonoType {
         let mut map = HashMap::new();
         self.instantiate_aux(&mut map, pty)
     }
 
     fn instantiate_aux(
         &self,
-        map: &mut HashMap<Unique, Rc<RefCell<TypeCell<Unique>>>>,
-        pty: &PolyType<Unique>,
-    ) -> MonoType<Unique> {
+        map: &mut HashMap<Ident, Rc<RefCell<TypeCell>>>,
+        pty: &PolyType,
+    ) -> MonoType {
         match pty {
             TypeBase::Lit(lit) => TypeBase::Lit(*lit),
             TypeBase::Var(var, _) => {
@@ -366,7 +353,7 @@ impl Infer {
         }
     }
 
-    pub fn infer_expr(&mut self, expr: &Expr<Unique>) -> InferResult<MonoType<Unique>> {
+    pub fn infer_expr(&mut self, expr: &Expr) -> InferResult<MonoType> {
         match expr {
             Expr::Lit { lit, .. } => Ok(TypeBase::Lit(lit.get_lit_type())),
             Expr::Var { var, .. } => match self.val_env.get(&var) {

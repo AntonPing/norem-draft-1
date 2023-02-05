@@ -1,11 +1,11 @@
 use crate::ast::LitVal;
-use crate::intern::Unique;
+use crate::intern::Ident;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Atom {
-    Var(Unique),
+    Var(Ident),
     Int(i64),
     Real(f64),
     Bool(bool),
@@ -50,7 +50,7 @@ impl Atom {
             _ => panic!("failed to unwrap literal!"),
         }
     }
-    pub fn unwrap_var(self) -> Unique {
+    pub fn unwrap_var(self) -> Ident {
         match self {
             Atom::Var(x) => x,
             _ => panic!("failed to unwrap variable!"),
@@ -78,20 +78,20 @@ pub enum MExpr {
         cont: Box<MExpr>,
     },
     UnOp {
-        bind: Unique,
+        bind: Ident,
         prim: UnOpPrim,
         arg1: Atom,
         cont: Box<MExpr>,
     },
     BinOp {
-        bind: Unique,
+        bind: Ident,
         prim: BinOpPrim,
         arg1: Atom,
         arg2: Atom,
         cont: Box<MExpr>,
     },
     Call {
-        bind: Unique,
+        bind: Ident,
         func: Atom,
         args: Vec<Atom>,
         cont: Box<MExpr>,
@@ -100,12 +100,12 @@ pub enum MExpr {
         arg1: Atom,
     },
     Alloc {
-        bind: Unique,
+        bind: Ident,
         size: usize,
         cont: Box<MExpr>,
     },
     Load {
-        bind: Unique,
+        bind: Ident,
         arg1: Atom,
         index: usize,
         cont: Box<MExpr>,
@@ -117,20 +117,20 @@ pub enum MExpr {
         cont: Box<MExpr>,
     },
     Offset {
-        bind: Unique,
+        bind: Ident,
         arg1: Atom,
         index: isize,
         cont: Box<MExpr>,
     },
     Ifte {
-        bind: Unique,
+        bind: Ident,
         arg1: Atom,
         brch1: Box<MExpr>,
         brch2: Box<MExpr>,
         cont: Box<MExpr>,
     },
     Switch {
-        bind: Unique,
+        bind: Ident,
         arg1: Atom,
         brchs: Vec<(usize, MExpr)>,
         dflt: Option<Box<MExpr>>,
@@ -154,8 +154,8 @@ impl MExpr {
         }
     }
 
-    pub fn make_tail_call(func: Unique, args: Vec<Atom>) -> MExpr {
-        let r = Unique::generate('r');
+    pub fn make_tail_call(func: Ident, args: Vec<Atom>) -> MExpr {
+        let r = Ident::generate('r');
         MExpr::Call {
             bind: r,
             func: Atom::Var(func),
@@ -167,13 +167,13 @@ impl MExpr {
 
 #[derive(Clone, Debug)]
 pub struct MDecl {
-    pub func: Unique,
-    pub pars: Vec<Unique>,
+    pub func: Ident,
+    pub pars: Vec<Ident>,
     pub body: MExpr,
 }
 
 struct AlphaEquiv {
-    map: HashMap<Unique, Unique>,
+    map: HashMap<Ident, Ident>,
 }
 
 impl AlphaEquiv {
@@ -183,7 +183,7 @@ impl AlphaEquiv {
         }
     }
 
-    fn eq_ident(&mut self, ident1: &Unique, ident2: &Unique) -> bool {
+    fn eq_ident(&mut self, ident1: &Ident, ident2: &Ident) -> bool {
         // println!("unify {ident1} and {ident2}");
         if let Some(bind) = self.map.get(&ident1) {
             bind == ident2
@@ -437,8 +437,9 @@ impl PartialEq for MDecl {
 }
 
 pub mod anf_build {
+    use crate::intern::InternStr;
+
     use super::*;
-    use crate::intern::intern;
     pub fn i(x: i64) -> Atom {
         Atom::Int(x)
     }
@@ -455,10 +456,10 @@ pub mod anf_build {
         Atom::Unit
     }
     pub fn v(x: &str) -> Atom {
-        Atom::Var(intern(x).as_dummy())
+        Atom::Var(Ident::from(InternStr::new(x)))
     }
-    pub fn name(x: &str) -> Unique {
-        intern(x).as_dummy()
+    pub fn name(x: &str) -> Ident {
+        Ident::from(InternStr::new(x))
     }
     pub fn fun(func: &str, pars: Vec<&str>, body: MExpr) -> MDecl {
         MDecl {

@@ -1,25 +1,23 @@
 use crate::ast::*;
 use crate::env_map::EnvMap;
-use crate::intern::{InternStr, Unique};
+use crate::intern::Ident;
 use crate::position::Span;
 
 pub struct Renamer {
-    /// map a `InternStr` to an `Unique` Identifier
-    val_map: EnvMap<InternStr, Unique>,
-    typ_map: EnvMap<InternStr, Unique>,
-    cons_map: EnvMap<InternStr, Unique>,
+    /// map a dummy identifier to an unique Identifier
+    val_map: EnvMap<Ident, Ident>,
+    typ_map: EnvMap<Ident, Ident>,
+    cons_map: EnvMap<Ident, Ident>,
     error: Vec<RenameError>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RenameError {
-    UnboundedValueVariable(Span, InternStr),
-    UnboundedTypeVariable(Span, InternStr),
-    UnboundedConstructorVariable(Span, InternStr),
-    MultipuleDefinition(Span, InternStr),
+    UnboundedValueVariable(Span, Ident),
+    UnboundedTypeVariable(Span, Ident),
+    UnboundedConstructorVariable(Span, Ident),
+    MultipuleDefinition(Span, Ident),
 }
-
-pub struct UnboundedError(InternStr);
 
 impl Renamer {
     pub fn new() -> Renamer {
@@ -43,44 +41,45 @@ impl Renamer {
         self.cons_map.leave_scope();
     }
 
-    fn intro_val_var(&mut self, ident: InternStr) -> Unique {
-        let uniq = ident.to_unique();
-        self.val_map.insert(ident, uniq);
-        uniq
+    fn intro_val_var(&mut self, var: Ident) -> Ident {
+        let ident = var.uniquify();
+        self.val_map.insert(var, ident);
+        ident
     }
 
-    fn intro_typ_var(&mut self, ident: InternStr) -> Unique {
-        let uniq = ident.to_unique();
-        self.typ_map.insert(ident, uniq);
-        uniq
+    fn intro_typ_var(&mut self, var: Ident) -> Ident {
+        let ident = var.uniquify();
+        self.typ_map.insert(var, ident);
+        ident
     }
 
-    fn intro_cons_var(&mut self, ident: InternStr) -> Unique {
-        let uniq = ident.to_unique();
-        self.cons_map.insert(ident, uniq);
-        uniq
+    fn intro_cons_var(&mut self, var: Ident) -> Ident {
+        let ident = var.uniquify();
+        self.cons_map.insert(var, ident);
+        ident
     }
 
-    fn lookup_val_var(&mut self, ident: InternStr) -> Option<Unique> {
+    fn lookup_val_var(&mut self, ident: Ident) -> Option<Ident> {
         self.val_map.get(&ident).copied()
     }
 
-    fn lookup_typ_var(&mut self, ident: InternStr) -> Option<Unique> {
+    fn lookup_typ_var(&mut self, ident: Ident) -> Option<Ident> {
         self.typ_map.get(&ident).copied()
     }
 
-    fn lookup_cons_var(&mut self, ident: InternStr) -> Option<Unique> {
+    fn lookup_cons_var(&mut self, ident: Ident) -> Option<Ident> {
         self.cons_map.get(&ident).copied()
     }
 
-    pub fn visit_expr(&mut self, expr: Expr<InternStr>) -> Expr<Unique> {
+    pub fn visit_expr(&mut self, expr: Expr) -> Expr {
         match expr {
             Expr::Lit { lit, span } => Expr::Lit { lit, span },
             Expr::Var { var, span } => {
+                assert!(var.is_dummy());
                 let var = self.lookup_val_var(var).unwrap_or_else(|| {
                     self.error
                         .push(RenameError::UnboundedValueVariable(span, var));
-                    var.to_unique()
+                    var
                 });
                 Expr::Var { var, span }
             }
@@ -90,9 +89,12 @@ impl Renamer {
             }
             Expr::Fun { pars, body, span } => {
                 self.enter_scope();
-                let pars: Vec<Unique> = pars
+                let pars: Vec<Ident> = pars
                     .into_iter()
-                    .map(|par| self.intro_val_var(par))
+                    .map(|par| {
+                        assert!(par.is_dummy());
+                        self.intro_val_var(par)
+                    })
                     .collect();
                 let body = Box::new(self.visit_expr(*body));
                 self.leave_scope();
@@ -107,7 +109,7 @@ impl Renamer {
                 let cons = self.lookup_cons_var(cons).unwrap_or_else(|| {
                     self.error
                         .push(RenameError::UnboundedConstructorVariable(span, cons));
-                    cons.to_unique()
+                    cons
                 });
                 let args = args.into_iter().map(|arg| self.visit_expr(arg)).collect();
                 Expr::Cons { cons, args, span }
@@ -120,6 +122,7 @@ impl Renamer {
             } => {
                 let expr = Box::new(self.visit_expr(*expr));
                 self.enter_scope();
+                assert!(bind.is_dummy());
                 let bind = self.intro_val_var(bind);
                 let cont = Box::new(self.visit_expr(*cont));
                 self.leave_scope();
@@ -144,15 +147,18 @@ impl Renamer {
                 for decl in &decls {
                     match decl {
                         Decl::Func { name, .. } => {
+                            assert!(name.is_dummy());
                             self.intro_val_var(*name);
                         }
                         Decl::Data { name, vars, .. } => {
+                            assert!(name.is_dummy());
                             self.intro_typ_var(*name);
                             for var in vars {
                                 self.intro_cons_var(var.cons);
                             }
                         }
                         Decl::Type { name, .. } => {
+                            assert!(name.is_dummy());
                             self.intro_typ_var(*name);
                         }
                     }
@@ -168,7 +174,7 @@ impl Renamer {
         }
     }
 
-    pub fn visit_rule(&mut self, rule: Rule<InternStr>) -> Rule<Unique> {
+    pub fn visit_rule(&mut self, rule: Rule) -> Rule {
         let Rule { patn, body, span } = rule;
         self.enter_scope();
         let patn = self.visit_patn(patn);
@@ -177,18 +183,20 @@ impl Renamer {
         Rule { patn, body, span }
     }
 
-    pub fn visit_patn(&mut self, patn: Pattern<InternStr>) -> Pattern<Unique> {
+    pub fn visit_patn(&mut self, patn: Pattern) -> Pattern {
         match patn {
             Pattern::Var { var, span } => {
+                assert!(var.is_dummy());
                 let var = self.intro_val_var(var);
                 Pattern::Var { var, span }
             }
             Pattern::Lit { lit, span } => Pattern::Lit { lit, span },
             Pattern::Cons { cons, pars, span } => {
+                assert!(cons.is_dummy());
                 let cons = self.lookup_cons_var(cons).unwrap_or_else(|| {
                     self.error
                         .push(RenameError::UnboundedConstructorVariable(span, cons));
-                    cons.to_unique()
+                    cons.uniquify()
                 });
                 let pars = pars.into_iter().map(|par| self.visit_patn(par)).collect();
                 Pattern::Cons { cons, pars, span }
@@ -197,7 +205,7 @@ impl Renamer {
         }
     }
 
-    pub fn visit_decl(&mut self, decl: Decl<InternStr>) -> Decl<Unique> {
+    pub fn visit_decl(&mut self, decl: Decl) -> Decl {
         match decl {
             Decl::Func {
                 name,
@@ -209,7 +217,7 @@ impl Renamer {
                 let name = self.lookup_val_var(name).unwrap_or_else(|| {
                     self.error
                         .push(RenameError::UnboundedValueVariable(span, name));
-                    name.to_unique()
+                    name.uniquify()
                 });
                 let pars = pars
                     .into_iter()
@@ -272,21 +280,23 @@ impl Renamer {
         }
     }
 
-    pub fn visit_varient(&mut self, var: Varient<InternStr>) -> Varient<Unique> {
+    pub fn visit_varient(&mut self, var: Varient) -> Varient {
         let Varient { cons, pars, span } = var;
+        assert!(cons.is_dummy());
         let cons = self.lookup_cons_var(cons).unwrap();
         let pars = pars.into_iter().map(|par| self.visit_type(par)).collect();
         Varient { cons, pars, span }
     }
 
-    pub fn visit_type(&mut self, typ: Type<InternStr>) -> Type<Unique> {
+    pub fn visit_type(&mut self, typ: Type) -> Type {
         match typ {
             Type::Lit { lit, span } => Type::Lit { lit, span },
             Type::Var { var, span } => {
+                assert!(var.is_dummy());
                 let var = self.lookup_typ_var(var).unwrap_or_else(|| {
                     self.error
                         .push(RenameError::UnboundedTypeVariable(span, var));
-                    var.to_unique()
+                    var.uniquify()
                 });
                 Type::Var { var, span }
             }
@@ -296,10 +306,11 @@ impl Renamer {
                 Type::Fun { pars, res, span }
             }
             Type::App { cons, args, span } => {
+                assert!(cons.is_dummy());
                 let cons = self.lookup_typ_var(cons).unwrap_or_else(|| {
                     self.error
                         .push(RenameError::UnboundedTypeVariable(span, cons));
-                    cons.to_unique()
+                    cons.uniquify()
                 });
                 let args = args.into_iter().map(|arg| self.visit_type(arg)).collect();
                 Type::App { cons, args, span }

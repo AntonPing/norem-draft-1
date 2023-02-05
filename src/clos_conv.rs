@@ -2,12 +2,12 @@ use std::collections::HashSet;
 
 use crate::anf::*;
 use crate::env_map::FreeSet;
-use crate::intern::Unique;
+use crate::intern::Ident;
 
 pub struct ClosConv {
     toplevel: Vec<MDecl>,
-    lifted: HashSet<Unique>,
-    freevar: FreeSet<Unique>,
+    lifted: HashSet<Ident>,
+    freevar: FreeSet<Ident>,
 }
 
 impl ClosConv {
@@ -29,7 +29,7 @@ impl ClosConv {
         .rename()
     }
 
-    fn visit_bind(&mut self, bind: Unique) -> Unique {
+    fn visit_bind(&mut self, bind: Ident) -> Ident {
         self.freevar.remove(&bind);
         bind
     }
@@ -85,8 +85,8 @@ impl ClosConv {
                 */
 
                 // record the order of function definition
-                let func_names: Vec<Unique> = decls.iter().map(|decl| decl.func).collect();
-                let c = Unique::generate('c');
+                let func_names: Vec<Ident> = decls.iter().map(|decl| decl.func).collect();
+                let c = Ident::generate('c');
 
                 self.freevar.enter_scope();
 
@@ -102,7 +102,7 @@ impl ClosConv {
                 }
 
                 // collect as vector to maintain the order
-                let freevars: Vec<Unique> = self.freevar.iter().cloned().collect();
+                let freevars: Vec<Ident> = self.freevar.iter().cloned().collect();
 
                 self.freevar.leave_scope();
 
@@ -182,7 +182,7 @@ impl ClosConv {
                 let cont = Box::new(self.visit_expr(*cont));
 
                 // generate shared closure 'c'
-                let c = Unique::generate('c');
+                let c = Ident::generate('c');
 
                 // here is the (function offset) part
                 let cont =
@@ -234,7 +234,7 @@ impl ClosConv {
                     let bind = f(func,a,b,...,z);
                     cont;
                 */
-                let f2 = Unique::generate('f');
+                let f2 = Ident::generate('f');
                 MExpr::Load {
                     bind: f2,
                     arg1: func,
