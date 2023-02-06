@@ -72,6 +72,8 @@ pub enum TokenKind {
     TyBool,
     /// literal type `Char`
     TyChar,
+    /// literal type or value `Unit`
+    Unit,
     /// builtin primitives
     Builtin,
     /// identifier(lowercase)
@@ -274,10 +276,17 @@ impl<'src> Lexer<'src> {
 
     pub fn next_token_kind(&mut self) -> TokenKind {
         match self.peek_first() {
-            Some('(') => {
-                self.next_char();
-                TokenKind::LParen
-            }
+            Some('(') => match self.peek_second() {
+                Some(')') => {
+                    self.next_char();
+                    self.next_char();
+                    TokenKind::Unit
+                }
+                _ => {
+                    self.next_char();
+                    TokenKind::LParen
+                }
+            },
             Some(')') => {
                 self.next_char();
                 TokenKind::RParen

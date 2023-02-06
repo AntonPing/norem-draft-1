@@ -439,6 +439,9 @@ impl Normalize {
                 ColType::Lit(LitType::Char) => {
                     todo!()
                 }
+                ColType::Lit(LitType::Unit) => {
+                    todo!()
+                }
             }
         }
     }

@@ -7,6 +7,7 @@ pub enum LitVal {
     Real(f64),
     Bool(bool),
     Char(char),
+    Unit,
 }
 
 impl LitVal {
@@ -16,6 +17,7 @@ impl LitVal {
             LitVal::Real(_) => LitType::Real,
             LitVal::Bool(_) => LitType::Bool,
             LitVal::Char(_) => LitType::Char,
+            LitVal::Unit => LitType::Unit,
         }
     }
 }
@@ -289,6 +291,7 @@ pub enum LitType {
     Real,
     Bool,
     Char,
+    Unit,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

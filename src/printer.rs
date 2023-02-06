@@ -63,13 +63,20 @@ impl Display for LitVal {
             LitVal::Real(x) => write!(f, "{x}"),
             LitVal::Bool(x) => write!(f, "{x}"),
             LitVal::Char(x) => write!(f, "{x}"),
+            LitVal::Unit => write!(f, "()"),
         }
     }
 }
 
 impl Display for LitType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            LitType::Int => write!(f, "Int"),
+            LitType::Real => write!(f, "Real"),
+            LitType::Bool => write!(f, "Bool"),
+            LitType::Char => write!(f, "Char"),
+            LitType::Unit => write!(f, "()"),
+        }
     }
 }
 

@@ -20,6 +20,7 @@ impl From<LitVal> for Atom {
             LitVal::Real(x) => Atom::Real(x),
             LitVal::Bool(x) => Atom::Bool(x),
             LitVal::Char(x) => Atom::Char(x),
+            LitVal::Unit => Atom::Unit,
         }
     }
 }

@@ -147,6 +147,10 @@ impl<'src> Parser<'src> {
                 self.next_token();
                 Ok(LitType::Char)
             }
+            TokenKind::Unit => {
+                self.next_token();
+                Ok(LitType::Unit)
+            }
             _ => {
                 static VEC: &[TokenKind] = &[
                     TokenKind::TyInt,
@@ -301,7 +305,11 @@ pub fn parse_expr(p: &mut Parser) -> ParseResult<Expr> {
 fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
     let start = p.start_pos();
     match p.peek_kind() {
-        TokenKind::LitInt | TokenKind::LitReal | TokenKind::LitBool | TokenKind::LitChar => {
+        TokenKind::LitInt
+        | TokenKind::LitReal
+        | TokenKind::LitBool
+        | TokenKind::LitChar
+        | TokenKind::Unit => {
             let lit = p.match_lit_val().unwrap();
             let span = Span::new(start, p.end_pos());
             Ok(Expr::Lit { lit, span })
@@ -420,7 +428,11 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
 fn parse_pattern(p: &mut Parser) -> ParseResult<Pattern> {
     let start = p.start_pos();
     match p.peek_kind() {
-        TokenKind::LitInt | TokenKind::LitReal | TokenKind::LitBool | TokenKind::LitChar => {
+        TokenKind::LitInt
+        | TokenKind::LitReal
+        | TokenKind::LitBool
+        | TokenKind::LitChar
+        | TokenKind::Unit => {
             let lit = p.match_lit_val().unwrap();
             let span = Span::new(start, p.end_pos());
             Ok(Pattern::Lit { lit, span })
@@ -565,7 +577,11 @@ pub fn parse_varient(p: &mut Parser) -> ParseResult<Varient> {
 fn parse_type(p: &mut Parser) -> ParseResult<Type> {
     let start = p.start_pos();
     match p.peek_kind() {
-        TokenKind::TyInt | TokenKind::TyReal | TokenKind::TyBool | TokenKind::TyChar => {
+        TokenKind::TyInt
+        | TokenKind::TyReal
+        | TokenKind::TyBool
+        | TokenKind::TyChar
+        | TokenKind::Unit => {
             let lit = p.match_lit_type().unwrap();
             let span = Span::new(start, p.end_pos());
             Ok(Type::Lit { lit, span })
