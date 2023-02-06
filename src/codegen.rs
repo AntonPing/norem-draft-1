@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use std::collections::HashMap;
 use std::fmt::Result;
 use std::fmt::Write;
 
@@ -6,19 +7,23 @@ use crate::anf::*;
 use crate::intern::Ident;
 
 pub struct Codegen {
+    ext_map: HashMap<Ident, usize>,
     bind_vec: Vec<Ident>,
+    is_main: bool,
     text: String,
 }
 
 impl Codegen {
-    pub fn new() -> Codegen {
+    pub fn new(map: HashMap<Ident, usize>) -> Codegen {
         Codegen {
+            ext_map: map,
             bind_vec: Vec::new(),
+            is_main: false,
             text: String::new(),
         }
     }
     pub fn run(expr: &MExpr) -> String {
-        let mut pass = Codegen::new();
+        let mut pass = Codegen::new(HashMap::new());
         pass.visit_toplevel(expr).unwrap();
         pass.text
     }
@@ -27,6 +32,7 @@ impl Codegen {
         match expr {
             MExpr::LetIn { decls, cont } => {
                 self.text.push_str(C_PROLOGUE);
+                self.visit_extern_header()?;
                 for decl in decls {
                     self.visit_decl_header(decl)?;
                 }
@@ -35,6 +41,7 @@ impl Codegen {
                 }
                 self.text.push_str("int main(int argc, char* argv[])\n{\n");
                 self.text.push_str(C_SYS_CHECK);
+                self.is_main = true;
                 self.visit_expr(cont)?;
                 self.text.push_str("}\n");
                 self.text.push_str(C_EPILOGUE);
@@ -82,7 +89,11 @@ impl Codegen {
                     }
                     None => {
                         // toplevel
-                        write!(self.text, "return {arg1};\n")
+                        if self.is_main {
+                            write!(self.text, "return 0;\n")
+                        } else {
+                            write!(self.text, "return {arg1};\n")
+                        }
                     }
                 }
             }
@@ -193,6 +204,15 @@ impl Codegen {
         }
     }
 
+    fn visit_extern_header(&mut self) -> Result {
+        for (func, arity) in self.ext_map.iter() {
+            let func = func.name;
+            let pars = (0..*arity).map(|i| format!("void* arg{i}")).format(&", ");
+            write!(self.text, "void* {func}({pars});\n")?;
+        }
+        Ok(())
+    }
+
     fn visit_decl_header(&mut self, decl: &MDecl) -> Result {
         let MDecl { func, pars, .. } = decl;
         let pars = pars.iter().map(|par| format!("void* {par}")).format(&", ");
@@ -253,6 +273,7 @@ fn dump_c_code() {
     use std::io::Write;
     let string = r#"
 begin
+    extern print_int : fun(Int) -> ()
     data List[T] =
     | Cons(T,List[T])
     | Nil
@@ -266,7 +287,8 @@ begin
         end
     }
 in
-    length(Cons(1,Cons(2,Cons(3,Cons(4,Nil)))))
+    let l = length(Cons(1,Cons(2,Cons(3,Cons(4,Cons(5,Nil))))));
+    #print_int(l)
 end
 "#;
 

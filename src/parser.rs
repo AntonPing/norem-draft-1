@@ -333,6 +333,15 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
             let span = Span::new(start, p.end_pos());
             Ok(Expr::Cons { cons, args, span })
         }
+        TokenKind::Hash => {
+            p.match_token(TokenKind::Hash).unwrap();
+            let func = p.match_lower_ident()?.name;
+            p.match_token(TokenKind::LParen)?;
+            let args = p.sepby(TokenKind::Comma, parse_expr)?;
+            p.match_token(TokenKind::RParen)?;
+            let span = Span::new(start, p.end_pos());
+            Ok(Expr::ExtCall { func, args, span })
+        }
         TokenKind::Builtin => {
             let prim = p.match_builtin().unwrap();
             p.match_token(TokenKind::LParen)?;
@@ -552,6 +561,27 @@ pub fn parse_decl(p: &mut Parser) -> ParseResult<Decl> {
                 span,
             })
         }
+        TokenKind::Extern => {
+            p.match_token(TokenKind::Extern).unwrap();
+            let name = p.match_lower_ident()?.name;
+            let pars = p
+                .option(|p| {
+                    p.match_token(TokenKind::LBracket)?;
+                    let pars = p.sepby1(TokenKind::Comma, |p| p.match_upper_ident())?;
+                    p.match_token(TokenKind::RBracket)?;
+                    Ok(pars)
+                })?
+                .unwrap_or(Vec::new());
+            p.match_token(TokenKind::Colon)?;
+            let typ = parse_type(p)?;
+            let span = Span::new(start, p.end_pos());
+            Ok(Decl::Extern {
+                name,
+                pars,
+                typ,
+                span,
+            })
+        }
         _ => {
             static VEC: &[TokenKind] = &[TokenKind::Fun, TokenKind::Data, TokenKind::Type];
             Err(p.err_unexpected_many(VEC))
@@ -650,6 +680,7 @@ begin
         | Some(y) => { Some(@iadd(x,1)) }
         | None => { None }
         end
+    extern print_int : fun(Int) -> ()
 in
     @isub(addone(42), 1)
 end
@@ -658,5 +689,5 @@ end
     let mut par = Parser::new(string);
     let res = parse_expr(&mut par);
     assert!(res.is_ok());
-    // println!("{}", res.unwrap());
+    println!("{}", res.unwrap());
 }

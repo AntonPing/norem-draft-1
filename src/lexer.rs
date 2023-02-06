@@ -32,6 +32,8 @@ pub enum TokenKind {
     Arrow,
     /// "=>"
     EArrow,
+    /// "#"
+    Hash,
     /// "fun"
     Fun,
     /// "let"
@@ -50,6 +52,8 @@ pub enum TokenKind {
     Data,
     /// "type"
     Type,
+    /// "extern"
+    Extern,
     /// "if"
     If,
     /// "then"
@@ -148,6 +152,7 @@ pub fn as_keyword(str: &str) -> Option<TokenKind> {
         "else" => TokenKind::Else,
         "data" => TokenKind::Data,
         "type" => TokenKind::Type,
+        "extern" => TokenKind::Extern,
         "true" => TokenKind::LitBool,
         "false" => TokenKind::LitBool,
         "Int" => TokenKind::TyInt,
@@ -326,6 +331,10 @@ impl<'src> Lexer<'src> {
             Some('|') => {
                 self.next_char();
                 TokenKind::Bar
+            }
+            Some('#') => {
+                self.next_char();
+                TokenKind::Hash
             }
             Some('=') => match self.peek_second() {
                 Some('>') => {
