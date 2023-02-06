@@ -1,5 +1,5 @@
 use crate::ast::LitVal;
-use crate::intern::Ident;
+use crate::intern::{Ident, InternStr};
 use std::collections::HashMap;
 use std::fmt::Debug;
 
@@ -94,6 +94,12 @@ pub enum MExpr {
     Call {
         bind: Ident,
         func: Atom,
+        args: Vec<Atom>,
+        cont: Box<MExpr>,
+    },
+    ExtCall {
+        bind: Ident,
+        func: InternStr,
         args: Vec<Atom>,
         cont: Box<MExpr>,
     },
@@ -519,6 +525,21 @@ pub mod anf_build {
                     assert!(cont.is_retn());
                     let cont = Box::new(e1);
                     MExpr::Call {
+                        bind,
+                        func,
+                        args,
+                        cont,
+                    }
+                }
+                MExpr::ExtCall {
+                    bind,
+                    func,
+                    args,
+                    cont,
+                } => {
+                    assert!(cont.is_retn());
+                    let cont = Box::new(e1);
+                    MExpr::ExtCall {
                         bind,
                         func,
                         args,

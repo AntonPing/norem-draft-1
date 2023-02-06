@@ -65,6 +65,16 @@ impl Codegen {
                 write!(self.text, "void* {bind} = {temp}({args});\n")?;
                 self.visit_expr(cont)
             }
+            MExpr::ExtCall {
+                bind,
+                func,
+                args,
+                cont,
+            } => {
+                let args = args.iter().map(|arg| format!("(void*){arg}")).format(", ");
+                write!(self.text, "void* {bind} = {func}({args});\n")?;
+                self.visit_expr(cont)
+            }
             MExpr::Retn { arg1 } => {
                 match self.bind_vec.last() {
                     Some(ret_addr) => {

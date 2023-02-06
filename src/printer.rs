@@ -121,6 +121,10 @@ impl Display for Expr {
                 let args = args.iter().format(&", ");
                 write!(f, "{func}({args})")
             }
+            Expr::ExtCall { func, args, .. } => {
+                let args = args.iter().format(&", ");
+                write!(f, "#{func}({args})")
+            }
             Expr::Cons { cons, args, .. } => {
                 let args = args.iter().format(&", ");
                 write!(f, "{cons}({args})")
@@ -240,6 +244,12 @@ impl Display for Decl {
                     write!(f, "type {name}[{pars}] = {typ};")
                 }
             }
+            Decl::Extern {
+                name, pars, typ, ..
+            } => {
+                let pars = pars.iter().format(&", ");
+                write!(f, "extern {name}({pars}) : {typ};")
+            }
         }
     }
 }
@@ -326,6 +336,15 @@ impl Display for MExpr {
                 write!(f, "let {bind} = {prim}({arg1},{arg2});{NWLN}{cont}")
             }
             MExpr::Call {
+                bind,
+                func,
+                args,
+                cont,
+            } => {
+                let args = args.iter().format(&", ");
+                write!(f, "let {bind} = {func}({args});{NWLN}{cont}")
+            }
+            MExpr::ExtCall {
                 bind,
                 func,
                 args,

@@ -394,6 +394,11 @@ impl Infer {
                 self.unify(&func, &func_ty)?;
                 Ok(res)
             }
+            Expr::ExtCall {
+                func: _, args: _, ..
+            } => {
+                todo!()
+            }
             Expr::Cons {
                 cons: _, args: _, ..
             } => {

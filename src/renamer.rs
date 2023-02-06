@@ -1,6 +1,8 @@
+use std::collections::HashSet;
+
 use crate::ast::*;
 use crate::env_map::EnvMap;
-use crate::intern::Ident;
+use crate::intern::{Ident, InternStr};
 use crate::position::Span;
 
 pub struct Renamer {
@@ -8,6 +10,7 @@ pub struct Renamer {
     val_map: EnvMap<Ident, Ident>,
     typ_map: EnvMap<Ident, Ident>,
     cons_map: EnvMap<Ident, Ident>,
+    ext_set: HashSet<InternStr>,
     error: Vec<RenameError>,
 }
 
@@ -16,7 +19,9 @@ pub enum RenameError {
     UnboundedValueVariable(Span, Ident),
     UnboundedTypeVariable(Span, Ident),
     UnboundedConstructorVariable(Span, Ident),
+    UndefinedExternalFunction(Span, InternStr),
     MultipuleDefinition(Span, Ident),
+    MultipuleExternalDefinition(Span, InternStr),
 }
 
 impl Renamer {
@@ -25,6 +30,7 @@ impl Renamer {
             val_map: EnvMap::new(),
             typ_map: EnvMap::new(),
             cons_map: EnvMap::new(),
+            ext_set: HashSet::new(),
             error: Vec::new(),
         }
     }
@@ -105,6 +111,14 @@ impl Renamer {
                 let args = args.into_iter().map(|arg| self.visit_expr(arg)).collect();
                 Expr::App { func, args, span }
             }
+            Expr::ExtCall { func, args, span } => {
+                if !self.ext_set.contains(&func) {
+                    self.error
+                        .push(RenameError::UndefinedExternalFunction(span, func))
+                }
+                let args = args.into_iter().map(|arg| self.visit_expr(arg)).collect();
+                Expr::ExtCall { func, args, span }
+            }
             Expr::Cons { cons, args, span } => {
                 let cons = self.lookup_cons_var(cons).unwrap_or_else(|| {
                     self.error
@@ -145,21 +159,26 @@ impl Renamer {
                 self.enter_scope();
                 // todo: multiple definition error
                 for decl in &decls {
+                    assert!(decl.get_name().is_dummy());
                     match decl {
                         Decl::Func { name, .. } => {
-                            assert!(name.is_dummy());
                             self.intro_val_var(*name);
                         }
                         Decl::Data { name, vars, .. } => {
-                            assert!(name.is_dummy());
                             self.intro_typ_var(*name);
                             for var in vars {
                                 self.intro_cons_var(var.cons);
                             }
                         }
                         Decl::Type { name, .. } => {
-                            assert!(name.is_dummy());
                             self.intro_typ_var(*name);
+                        }
+                        Decl::Extern { name, span, .. } => {
+                            if self.ext_set.contains(&name) {
+                                self.error
+                                    .push(RenameError::MultipuleExternalDefinition(*span, *name));
+                            }
+                            self.ext_set.insert(*name);
                         }
                     }
                 }
@@ -271,6 +290,26 @@ impl Renamer {
                 let typ = self.visit_type(typ);
                 self.leave_scope();
                 Decl::Type {
+                    name,
+                    pars,
+                    typ,
+                    span,
+                }
+            }
+            Decl::Extern {
+                name,
+                pars,
+                typ,
+                span,
+            } => {
+                self.enter_scope();
+                let pars = pars
+                    .into_iter()
+                    .map(|par| self.intro_typ_var(par))
+                    .collect();
+                let typ = self.visit_type(typ);
+                self.leave_scope();
+                Decl::Extern {
                     name,
                     pars,
                     typ,

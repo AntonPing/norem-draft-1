@@ -50,6 +50,20 @@ impl MExpr {
                     cont,
                 }
             }
+            MExpr::ExtCall {
+                bind,
+                func,
+                args,
+                cont,
+            } => {
+                let bind = f(bind);
+                MExpr::ExtCall {
+                    bind,
+                    func,
+                    args,
+                    cont,
+                }
+            }
             MExpr::Retn { arg1 } => MExpr::Retn { arg1 },
             MExpr::Alloc { bind, size, cont } => {
                 let bind = f(bind);
@@ -172,6 +186,20 @@ impl MExpr {
                 let func = f(func);
                 let args = args.into_iter().map(f).collect();
                 MExpr::Call {
+                    bind,
+                    func,
+                    args,
+                    cont,
+                }
+            }
+            MExpr::ExtCall {
+                bind,
+                func,
+                args,
+                cont,
+            } => {
+                let args = args.into_iter().map(f).collect();
+                MExpr::ExtCall {
                     bind,
                     func,
                     args,
@@ -355,6 +383,20 @@ impl MExpr {
             } => {
                 let cont = Box::new(f(*cont));
                 MExpr::Call {
+                    bind,
+                    func,
+                    args,
+                    cont,
+                }
+            }
+            MExpr::ExtCall {
+                bind,
+                func,
+                args,
+                cont,
+            } => {
+                let cont = Box::new(f(*cont));
+                MExpr::ExtCall {
                     bind,
                     func,
                     args,

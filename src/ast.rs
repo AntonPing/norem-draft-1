@@ -1,4 +1,4 @@
-use crate::intern::Ident;
+use crate::intern::{Ident, InternStr};
 use crate::position::{Span, Spanned};
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
@@ -84,6 +84,11 @@ pub enum Expr {
         args: Vec<Expr>,
         span: Span,
     },
+    ExtCall {
+        func: InternStr,
+        args: Vec<Expr>,
+        span: Span,
+    },
     Cons {
         cons: Ident,
         args: Vec<Expr>,
@@ -115,6 +120,7 @@ impl Spanned for Expr {
             Expr::Prim { span, .. } => span,
             Expr::Fun { span, .. } => span,
             Expr::App { span, .. } => span,
+            Expr::ExtCall { span, .. } => span,
             Expr::Cons { span, .. } => span,
             Expr::Let { span, .. } => span,
             Expr::Case { span, .. } => span,
@@ -128,6 +134,7 @@ impl Spanned for Expr {
             Expr::Prim { span, .. } => span,
             Expr::Fun { span, .. } => span,
             Expr::App { span, .. } => span,
+            Expr::ExtCall { span, .. } => span,
             Expr::Cons { span, .. } => span,
             Expr::Let { span, .. } => span,
             Expr::Case { span, .. } => span,
@@ -144,6 +151,7 @@ impl Expr {
             Expr::Prim { .. } => true,
             Expr::Fun { .. } => true,
             Expr::App { .. } => true,
+            Expr::ExtCall { .. } => true,
             Expr::Cons { .. } => true,
             Expr::Let { .. } => false,
             Expr::Case { .. } => false,
@@ -249,6 +257,12 @@ pub enum Decl {
         typ: Type,
         span: Span,
     },
+    Extern {
+        name: InternStr,
+        pars: Vec<Ident>,
+        typ: Type,
+        span: Span,
+    },
 }
 
 impl Decl {
@@ -257,6 +271,7 @@ impl Decl {
             Decl::Func { name, .. } => *name,
             Decl::Data { name, .. } => *name,
             Decl::Type { name, .. } => *name,
+            Decl::Extern { name, .. } => Ident::from(*name),
         }
     }
 }
@@ -274,6 +289,7 @@ impl Spanned for Decl {
             Decl::Func { span, .. } => span,
             Decl::Data { span, .. } => span,
             Decl::Type { span, .. } => span,
+            Decl::Extern { span, .. } => span,
         }
     }
     fn span_mut(&mut self) -> &mut Span {
@@ -281,6 +297,7 @@ impl Spanned for Decl {
             Decl::Func { span, .. } => span,
             Decl::Data { span, .. } => span,
             Decl::Type { span, .. } => span,
+            Decl::Extern { span, .. } => span,
         }
     }
 }

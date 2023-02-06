@@ -461,6 +461,17 @@ impl DeadElim {
                     cont,
                 }
             }
+            MExpr::ExtCall {
+                bind,
+                func,
+                args,
+                cont,
+            } => MExpr::ExtCall {
+                bind,
+                func,
+                args,
+                cont,
+            },
             MExpr::Retn { arg1 } => {
                 if *self.ret_used.last().unwrap() {
                     MExpr::Retn { arg1 }

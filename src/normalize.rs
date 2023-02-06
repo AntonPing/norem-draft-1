@@ -161,6 +161,26 @@ impl Normalize {
                     .fold(res, |res, (bind, arg)| self.normalize(arg, bind, res));
                 res
             }
+            Expr::ExtCall { func, args, .. } => {
+                // normalize(f(e1,..,en), hole, ctx) =
+                // normalize(en,xn,
+                //   ...
+                //     normalize(e1,x1,
+                //       let hole = f(x1,...,xn) in ctx))...)
+                let argvars: Vec<Ident> = args.iter().map(|_| Ident::generate('x')).collect();
+                let res = MExpr::ExtCall {
+                    bind: hole,
+                    func: *func,
+                    args: argvars.iter().map(|arg| Atom::Var(*arg)).collect(),
+                    cont: Box::new(ctx),
+                };
+                let res = argvars
+                    .iter()
+                    .cloned()
+                    .zip(args.into_iter())
+                    .fold(res, |res, (bind, arg)| self.normalize(arg, bind, res));
+                res
+            }
             Expr::Cons { cons, args, .. } => {
                 // normalize(ci(e1,..,en), hole, ctx) =
                 // normalize(en,xn,
@@ -352,6 +372,7 @@ impl Normalize {
                             );
                             None
                         }
+                        Decl::Extern { .. } => None,
                     })
                     .collect();
                 let cont = Box::new(self.normalize_top(cont));
