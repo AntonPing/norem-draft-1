@@ -1,6 +1,5 @@
+use super::*;
 use std::fmt;
-
-use crate::position::*;
 
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum DiagLevel {

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process;
 
 extern crate norem;
-use norem::driver;
+use norem::utils::driver;
 
 #[test]
 fn tets_list_length() {

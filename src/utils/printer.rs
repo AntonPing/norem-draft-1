@@ -1,6 +1,6 @@
-use crate::anf::*;
-use crate::ast::*;
-use itertools::{self, Itertools};
+use crate::backend::anf::*;
+use crate::frontend::ast::*;
+use itertools::Itertools;
 use std::cell::Cell;
 use std::fmt::{self, Debug, Display};
 

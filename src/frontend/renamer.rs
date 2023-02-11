@@ -1,9 +1,6 @@
+use super::*;
+use crate::utils::env_map::EnvMap;
 use std::collections::HashSet;
-
-use crate::ast::*;
-use crate::env_map::EnvMap;
-use crate::intern::{Ident, InternStr};
-use crate::position::Span;
 
 pub struct Renamer {
     /// map a dummy identifier to an unique Identifier
@@ -360,7 +357,7 @@ impl Renamer {
 
 #[test]
 fn renamer_test() {
-    use crate::parser::*;
+    use super::parser::*;
     let string = r#"
 begin
     type My-Int = Int;

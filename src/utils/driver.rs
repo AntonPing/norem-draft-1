@@ -5,16 +5,12 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process;
 
-use crate::clos_conv::ClosConv;
-use crate::codegen::Codegen;
-use crate::normalize::Normalize;
-use crate::parser::{parse_expr, Parser};
-use crate::renamer::Renamer;
-use crate::simple_opt::{ConstFold, DeadElim, LinearInline};
+use crate::backend;
+use crate::frontend;
 
 #[derive(Debug)]
 pub enum TopError {
-    ParseError(crate::parser::ParseError),
+    ParseError(crate::frontend::parser::ParseError),
     IOError(std::io::Error),
 }
 
@@ -36,8 +32,8 @@ impl Display for TopError {
 
 impl Error for TopError {}
 
-impl From<crate::parser::ParseError> for TopError {
-    fn from(value: crate::parser::ParseError) -> Self {
+impl From<frontend::parser::ParseError> for TopError {
+    fn from(value: frontend::parser::ParseError) -> Self {
         TopError::ParseError(value)
     }
 }
@@ -49,44 +45,44 @@ impl From<std::io::Error> for TopError {
 }
 
 pub fn compile_source(source: String, dump: bool) -> Result<String, TopError> {
-    let mut par = Parser::new(&source);
-    let expr = parse_expr(&mut par)?;
+    let mut par = frontend::parser::Parser::new(&source);
+    let expr = frontend::parser::parse_expr(&mut par)?;
 
-    let mut rnm = Renamer::new();
+    let mut rnm = frontend::renamer::Renamer::new();
     let expr = rnm.visit_expr(expr);
-    let expr = Normalize::run(&expr);
+    let expr = backend::normalize::Normalize::run(&expr);
     if dump {
         println!("normalize:\n{expr}");
     }
-    let expr = DeadElim::run(expr);
+    let expr = backend::simple_opt::DeadElim::run(expr);
     if dump {
         println!("dead-elim:\n{expr}");
     }
-    let expr = ConstFold::run(expr);
+    let expr = backend::simple_opt::ConstFold::run(expr);
     if dump {
         println!("const-fold:\n{expr}");
     }
-    let expr = LinearInline::run(expr);
+    let expr = backend::simple_opt::LinearInline::run(expr);
     if dump {
         println!("linear-inline:\n{expr}");
     }
-    let expr = ClosConv::run(expr);
+    let expr = backend::clos_conv::ClosConv::run(expr);
     if dump {
         println!("clos-conv:\n{expr}");
     }
-    let expr = DeadElim::run(expr);
+    let expr = backend::simple_opt::DeadElim::run(expr);
     if dump {
         println!("dead-elim:\n{expr}");
     }
-    let expr = ConstFold::run(expr);
+    let expr = backend::simple_opt::ConstFold::run(expr);
     if dump {
         println!("const-fold:\n{expr}");
     }
-    let expr = LinearInline::run(expr);
+    let expr = backend::simple_opt::LinearInline::run(expr);
     if dump {
         println!("linear-inline:\n{expr}");
     }
-    let text = Codegen::run(&expr);
+    let text = backend::codegen::Codegen::run(&expr);
     if dump {
         println!("codegen:\n{text}");
     }

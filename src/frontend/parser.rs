@@ -1,7 +1,5 @@
-use crate::ast::*;
-use crate::intern::{Ident, InternStr};
-use crate::lexer::{Lexer, Token, TokenKind};
-use crate::position::{Position, Span, Spanned};
+use super::lexer::{Lexer, Token, TokenKind};
+use super::*;
 
 pub struct Parser<'src> {
     source: &'src str,

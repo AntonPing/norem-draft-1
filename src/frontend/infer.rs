@@ -1,4 +1,4 @@
-use itertools::{self, Itertools};
+use itertools::Itertools;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -6,8 +6,7 @@ use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
-use crate::ast::*;
-use crate::intern::*;
+use super::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TypeCell {
@@ -431,8 +430,8 @@ impl Infer {
 
 #[test]
 fn type_check_test() {
-    use crate::parser::*;
-    use crate::renamer::Renamer;
+    use super::parser::*;
+    use super::renamer::Renamer;
     let string = r#"
 let combi = fun(x) => x;
 let combk = fun(x,y) => x;

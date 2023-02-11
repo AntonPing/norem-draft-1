@@ -1,6 +1,5 @@
 use std::borrow::Borrow;
-use std::collections::{hash_map, hash_set};
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map, hash_set, HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::mem;

@@ -1,8 +1,6 @@
+use super::*;
+use crate::utils::env_map::FreeSet;
 use std::collections::HashSet;
-
-use crate::anf::*;
-use crate::env_map::FreeSet;
-use crate::intern::Ident;
 
 pub struct ClosConv {
     toplevel: Vec<MDecl>,
@@ -266,7 +264,7 @@ impl ClosConv {
 
 #[test]
 fn clos_conv_test() {
-    use crate::anf::anf_build::*;
+    use super::anf_build::*;
 
     // test free varible in function declaration
     let expr1 = chain(vec![

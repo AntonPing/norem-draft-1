@@ -1,6 +1,5 @@
-use crate::anf::*;
-use crate::env_map::EnvMap;
-use crate::intern::Ident;
+use super::*;
+use crate::utils::env_map::EnvMap;
 
 impl MExpr {
     pub fn walk_bind<F: FnMut(Ident) -> Ident>(self, mut f: F) -> MExpr {

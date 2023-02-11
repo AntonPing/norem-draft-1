@@ -1,5 +1,4 @@
-use crate::intern::{Ident, InternStr};
-use crate::position::{Span, Spanned};
+use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum LitVal {

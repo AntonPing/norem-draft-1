@@ -1,8 +1,6 @@
-use crate::anf::*;
-use crate::ast::*;
-use crate::intern::Ident;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use super::*;
+use crate::frontend::ast::*;
+use std::collections::{HashMap, HashSet};
 
 #[allow(dead_code)]
 pub struct DataCons {
@@ -713,9 +711,9 @@ impl PatnMatrix {
 
 #[test]
 fn normalize_test() {
-    use crate::anf::anf_build::*;
-    use crate::parser::*;
-    use crate::renamer::Renamer;
+    use super::anf_build::*;
+    use crate::frontend::parser::*;
+    use crate::frontend::renamer::Renamer;
 
     let string = r#"
 @iadd(@iadd(1,2),@iadd(3,4))
@@ -775,8 +773,8 @@ f(42)
 #[test]
 #[ignore]
 fn normalize_pattern_match_test() {
-    use crate::parser::*;
-    use crate::renamer::Renamer;
+    use crate::frontend::parser::*;
+    use crate::frontend::renamer::Renamer;
     let string = r#"
 begin
     data List[T] =
@@ -800,8 +798,6 @@ end
     let mut rnm = Renamer::new();
     let expr1 = rnm.visit_expr(expr1);
     println!("{expr1:#?}");
-
     let expr1 = Normalize::run(&expr1);
-
     println!("{expr1}");
 }

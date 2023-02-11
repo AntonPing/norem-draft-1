@@ -1,10 +1,7 @@
+use super::*;
 use itertools::Itertools;
 use std::collections::HashMap;
-use std::fmt::Result;
-use std::fmt::Write;
-
-use crate::anf::*;
-use crate::intern::Ident;
+use std::fmt::{Result, Write};
 
 pub struct Codegen {
     ext_map: HashMap<Ident, usize>,
@@ -262,66 +259,8 @@ exit(1);
 
 #[test]
 #[ignore]
-fn dump_c_code() {
-    use crate::clos_conv::ClosConv;
-    use crate::normalize::Normalize;
-    use crate::parser::{parse_expr, Parser};
-    use crate::renamer::Renamer;
-    use crate::simple_opt::LinearInline;
-    use crate::simple_opt::{ConstFold, DeadElim};
-    use std::fs::{self, File};
-    use std::io::Write;
-    let string = r#"
-begin
-    extern print_int : fun(Int) -> ()
-    data List[T] =
-    | Cons(T,List[T])
-    | Nil
-    end
-    fun length(lst) => {
-        case lst of
-        | Cons(head,tail) => {
-            @iadd(length(tail),1)
-        }
-        | Nil => { 0 }
-        end
-    }
-in
-    let l = length(Cons(1,Cons(2,Cons(3,Cons(4,Cons(5,Nil))))));
-    #print_int(l)
-end
-"#;
-
-    let mut par = Parser::new(string);
-    let expr1 = parse_expr(&mut par).unwrap();
-    let mut rnm = Renamer::new();
-    let expr1 = rnm.visit_expr(expr1);
-    let expr1 = Normalize::run(&expr1);
-    println!("normalize:\n{expr1}");
-    let expr1 = DeadElim::run(expr1);
-    println!("dead-elim:\n{expr1}");
-    let expr1 = ConstFold::run(expr1);
-    println!("const-fold:\n{expr1}");
-    let expr1 = LinearInline::run(expr1);
-    println!("linear-inline:\n{expr1}");
-    let expr1 = ClosConv::run(expr1);
-    println!("clos-conv\n{expr1}");
-    let expr1 = DeadElim::run(expr1);
-    println!("dead-elim:\n{expr1}");
-    let expr1 = ConstFold::run(expr1);
-    println!("const-fold:\n{expr1}");
-    let expr1 = LinearInline::run(expr1);
-    println!("linear-inline:\n{expr1}");
-    let text = Codegen::run(&expr1);
-    fs::create_dir_all("./target/output").unwrap();
-    let mut output = File::create("./target/output/test_output.c").unwrap();
-    output.write(text.as_bytes()).unwrap();
-}
-
-#[test]
-#[ignore]
 fn codegen_test() {
-    use crate::anf::anf_build::*;
+    use super::anf_build::*;
     let expr1 = let_in(
         vec![fun(
             "f1",
@@ -332,6 +271,5 @@ fn codegen_test() {
     );
     let text1 = Codegen::run(&expr1);
     println!("{text1}");
-
     // todo: more tests
 }

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::{fmt, ops, sync::Mutex};
+use std::{fmt, ops, sync};
 
 lazy_static::lazy_static! {
-    static ref INTERNER: Mutex<Interner> = Mutex::new(Interner::new());
+    static ref INTERNER: sync::Mutex<Interner> = sync::Mutex::new(Interner::new());
 }
 
 struct Interner {

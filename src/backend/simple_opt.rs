@@ -1,6 +1,5 @@
-use crate::anf::*;
-use crate::env_map::*;
-use crate::intern::Ident;
+use super::*;
+use crate::utils::env_map::{EnvMap, FreeSet};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -812,7 +811,7 @@ impl LinearInline {
 
 #[test]
 fn const_fold_test() {
-    use crate::anf::anf_build::*;
+    use super::anf_build::*;
 
     // test arithmetic operation optimization(and move operation)
     let expr1 = chain(vec![
@@ -913,7 +912,7 @@ fn const_fold_test() {
 
 #[test]
 fn dead_elim_test() {
-    use crate::anf::anf_build::*;
+    use super::anf_build::*;
 
     // test dead arithmetic operation elimination
     let expr1 = chain(vec![
@@ -993,7 +992,7 @@ fn dead_elim_test() {
 
 #[test]
 fn inliner_inline_test() {
-    use crate::anf::anf_build::*;
+    use super::anf_build::*;
     let expr1 = let_in(
         vec![fun(
             "f1",
