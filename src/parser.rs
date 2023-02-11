@@ -35,8 +35,16 @@ impl<'src> Parser<'src> {
         &self.tokens[self.cursor]
     }
 
-    fn peek_kind(&self) -> TokenKind {
+    fn peek_first(&self) -> TokenKind {
         self.tokens[self.cursor].kind
+    }
+
+    fn peek_second(&self) -> TokenKind {
+        if self.cursor < self.tokens.len() - 1 {
+            self.tokens[self.cursor + 1].kind
+        } else {
+            TokenKind::EndOfFile
+        }
     }
 
     fn peek_span(&self) -> &Span {
@@ -75,7 +83,7 @@ impl<'src> Parser<'src> {
     }
 
     fn match_token(&mut self, token: TokenKind) -> ParseResult<()> {
-        if self.peek_kind() == token {
+        if self.peek_first() == token {
             self.next_token();
             Ok(())
         } else {
@@ -96,7 +104,7 @@ impl<'src> Parser<'src> {
     */
 
     fn match_lit_val(&mut self) -> ParseResult<LitVal> {
-        match self.peek_kind() {
+        match self.peek_first() {
             TokenKind::LitInt => {
                 let slice = self.peek_slice();
                 self.next_token();
@@ -117,12 +125,18 @@ impl<'src> Parser<'src> {
                 self.next_token();
                 Ok(LitVal::Bool(slice.parse().unwrap()))
             }
+            TokenKind::LParen if self.peek_second() == TokenKind::RParen => {
+                self.next_token();
+                self.next_token();
+                Ok(LitVal::Unit)
+            }
             _ => {
                 static VEC: &[TokenKind] = &[
                     TokenKind::LitInt,
                     TokenKind::LitReal,
                     TokenKind::LitBool,
                     TokenKind::LitChar,
+                    TokenKind::LParen,
                 ];
                 Err(self.err_unexpected_many(VEC))
             }
@@ -130,7 +144,7 @@ impl<'src> Parser<'src> {
     }
 
     fn match_lit_type(&mut self) -> ParseResult<LitType> {
-        match self.peek_kind() {
+        match self.peek_first() {
             TokenKind::TyInt => {
                 self.next_token();
                 Ok(LitType::Int)
@@ -147,7 +161,8 @@ impl<'src> Parser<'src> {
                 self.next_token();
                 Ok(LitType::Char)
             }
-            TokenKind::Unit => {
+            TokenKind::LParen if self.peek_second() == TokenKind::RParen => {
+                self.next_token();
                 self.next_token();
                 Ok(LitType::Unit)
             }
@@ -157,6 +172,7 @@ impl<'src> Parser<'src> {
                     TokenKind::TyReal,
                     TokenKind::TyBool,
                     TokenKind::TyChar,
+                    TokenKind::LParen,
                 ];
                 Err(self.err_unexpected_many(VEC))
             }
@@ -164,7 +180,7 @@ impl<'src> Parser<'src> {
     }
 
     fn match_lower_ident(&mut self) -> ParseResult<Ident> {
-        if self.peek_kind() == TokenKind::LowerIdent {
+        if self.peek_first() == TokenKind::LowerIdent {
             let slice = self.peek_slice();
             self.next_token();
             Ok(Ident::from(InternStr::new(slice)))
@@ -174,7 +190,7 @@ impl<'src> Parser<'src> {
     }
 
     fn match_upper_ident(&mut self) -> ParseResult<Ident> {
-        if self.peek_kind() == TokenKind::UpperIdent {
+        if self.peek_first() == TokenKind::UpperIdent {
             let slice = self.peek_slice();
             self.next_token();
             Ok(Ident::from(InternStr::new(slice)))
@@ -184,7 +200,7 @@ impl<'src> Parser<'src> {
     }
 
     fn match_builtin(&mut self) -> ParseResult<Builtin> {
-        if self.peek_kind() == TokenKind::Builtin {
+        if self.peek_first() == TokenKind::Builtin {
             let slice = self.peek_slice();
             self.next_token();
             let res = match slice {
@@ -275,7 +291,7 @@ impl<'src> Parser<'src> {
         let mut vec = Vec::new();
         let first = func(self)?;
         vec.push(first);
-        while self.peek_kind() == delim {
+        while self.peek_first() == delim {
             self.next_token();
             let res = func(self)?;
             vec.push(res);
@@ -304,12 +320,8 @@ pub fn parse_expr(p: &mut Parser) -> ParseResult<Expr> {
 
 fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
     let start = p.start_pos();
-    match p.peek_kind() {
-        TokenKind::LitInt
-        | TokenKind::LitReal
-        | TokenKind::LitBool
-        | TokenKind::LitChar
-        | TokenKind::Unit => {
+    match p.peek_first() {
+        TokenKind::LitInt | TokenKind::LitReal | TokenKind::LitBool | TokenKind::LitChar => {
             let lit = p.match_lit_val().unwrap();
             let span = Span::new(start, p.end_pos());
             Ok(Expr::Lit { lit, span })
@@ -321,7 +333,7 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
         }
         TokenKind::UpperIdent => {
             let cons = p.match_upper_ident().unwrap();
-            let args = if p.peek_kind() == TokenKind::LParen {
+            let args = if p.peek_first() == TokenKind::LParen {
                 p.match_token(TokenKind::LParen).unwrap();
                 let args = p.sepby(TokenKind::Comma, parse_expr)?;
                 p.match_token(TokenKind::RParen)?;
@@ -436,12 +448,13 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
 
 fn parse_pattern(p: &mut Parser) -> ParseResult<Pattern> {
     let start = p.start_pos();
-    match p.peek_kind() {
-        TokenKind::LitInt
-        | TokenKind::LitReal
-        | TokenKind::LitBool
-        | TokenKind::LitChar
-        | TokenKind::Unit => {
+    match p.peek_first() {
+        TokenKind::LitInt | TokenKind::LitReal | TokenKind::LitBool | TokenKind::LitChar => {
+            let lit = p.match_lit_val().unwrap();
+            let span = Span::new(start, p.end_pos());
+            Ok(Pattern::Lit { lit, span })
+        }
+        TokenKind::LParen if p.peek_second() == TokenKind::RParen => {
             let lit = p.match_lit_val().unwrap();
             let span = Span::new(start, p.end_pos());
             Ok(Pattern::Lit { lit, span })
@@ -453,7 +466,7 @@ fn parse_pattern(p: &mut Parser) -> ParseResult<Pattern> {
         }
         TokenKind::UpperIdent => {
             let cons = p.match_upper_ident().unwrap();
-            let pars = if p.peek_kind() == TokenKind::LParen {
+            let pars = if p.peek_first() == TokenKind::LParen {
                 p.match_token(TokenKind::LParen).unwrap();
                 let pars = p.sepby(TokenKind::Comma, parse_pattern)?;
                 p.match_token(TokenKind::RParen)?;
@@ -476,6 +489,7 @@ fn parse_pattern(p: &mut Parser) -> ParseResult<Pattern> {
                 // TokenKind::LitReal,
                 TokenKind::LitBool,
                 TokenKind::LitChar,
+                TokenKind::LParen,
                 TokenKind::LowerIdent,
                 TokenKind::Wild,
             ];
@@ -497,7 +511,7 @@ fn parse_rule(p: &mut Parser) -> ParseResult<Rule> {
 
 pub fn parse_decl(p: &mut Parser) -> ParseResult<Decl> {
     let start = p.start_pos();
-    match p.peek_kind() {
+    match p.peek_first() {
         TokenKind::Fun => {
             p.match_token(TokenKind::Fun).unwrap();
             let name = p.match_lower_ident()?;
@@ -574,6 +588,7 @@ pub fn parse_decl(p: &mut Parser) -> ParseResult<Decl> {
                 .unwrap_or(Vec::new());
             p.match_token(TokenKind::Colon)?;
             let typ = parse_type(p)?;
+            p.match_token(TokenKind::Semi)?;
             let span = Span::new(start, p.end_pos());
             Ok(Decl::Extern {
                 name,
@@ -606,19 +621,20 @@ pub fn parse_varient(p: &mut Parser) -> ParseResult<Varient> {
 
 fn parse_type(p: &mut Parser) -> ParseResult<Type> {
     let start = p.start_pos();
-    match p.peek_kind() {
-        TokenKind::TyInt
-        | TokenKind::TyReal
-        | TokenKind::TyBool
-        | TokenKind::TyChar
-        | TokenKind::Unit => {
+    match p.peek_first() {
+        TokenKind::TyInt | TokenKind::TyReal | TokenKind::TyBool | TokenKind::TyChar => {
+            let lit = p.match_lit_type().unwrap();
+            let span = Span::new(start, p.end_pos());
+            Ok(Type::Lit { lit, span })
+        }
+        TokenKind::LParen if p.peek_second() == TokenKind::RParen => {
             let lit = p.match_lit_type().unwrap();
             let span = Span::new(start, p.end_pos());
             Ok(Type::Lit { lit, span })
         }
         TokenKind::UpperIdent => {
             let var = p.match_upper_ident().unwrap();
-            if p.peek_kind() == TokenKind::LBracket {
+            if p.peek_first() == TokenKind::LBracket {
                 p.match_token(TokenKind::LBracket)?;
                 let args = p.sepby1(TokenKind::Comma, parse_type)?;
                 p.match_token(TokenKind::RBracket)?;
@@ -661,6 +677,7 @@ fn parse_type(p: &mut Parser) -> ParseResult<Type> {
 fn parser_test() {
     let string = r#"
 begin
+    extern print_int : fun(Int) -> ();
     type My-Int = Int;
     type Option-Int = Option[Int];
     data Option[T] =
@@ -680,7 +697,6 @@ begin
         | Some(y) => { Some(@iadd(x,1)) }
         | None => { None }
         end
-    extern print_int : fun(Int) -> ()
 in
     @isub(addone(42), 1)
 end
@@ -688,6 +704,7 @@ end
 
     let mut par = Parser::new(string);
     let res = parse_expr(&mut par);
+    // println!("{res:?}");
     assert!(res.is_ok());
     println!("{}", res.unwrap());
 }
