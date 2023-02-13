@@ -47,22 +47,21 @@ impl From<std::io::Error> for TopError {
 pub fn compile_source(source: String, dump: bool) -> Result<String, TopError> {
     let mut par = frontend::parser::Parser::new(&source);
     let expr = frontend::parser::parse_expr(&mut par)?;
-
     let mut rnm = frontend::renamer::Renamer::new();
     let expr = rnm.visit_expr(expr);
     let expr = backend::normalize::Normalize::run(&expr);
     if dump {
         println!("normalize:\n{expr}");
     }
-    let expr = backend::simple_opt::DeadElim::run(expr);
+    let expr = backend::dead_elim::run_dead_elim(expr);
     if dump {
         println!("dead-elim:\n{expr}");
     }
-    let expr = backend::simple_opt::ConstFold::run(expr);
+    let expr = backend::const_fold::run_const_fold(expr);
     if dump {
         println!("const-fold:\n{expr}");
     }
-    let expr = backend::simple_opt::LinearInline::run(expr);
+    let expr = backend::linear_inline::run_linear_inline(expr);
     if dump {
         println!("linear-inline:\n{expr}");
     }
@@ -70,15 +69,15 @@ pub fn compile_source(source: String, dump: bool) -> Result<String, TopError> {
     if dump {
         println!("clos-conv:\n{expr}");
     }
-    let expr = backend::simple_opt::DeadElim::run(expr);
+    let expr = backend::dead_elim::run_dead_elim(expr);
     if dump {
         println!("dead-elim:\n{expr}");
     }
-    let expr = backend::simple_opt::ConstFold::run(expr);
+    let expr = backend::const_fold::run_const_fold(expr);
     if dump {
         println!("const-fold:\n{expr}");
     }
-    let expr = backend::simple_opt::LinearInline::run(expr);
+    let expr = backend::linear_inline::run_linear_inline(expr);
     if dump {
         println!("linear-inline:\n{expr}");
     }
