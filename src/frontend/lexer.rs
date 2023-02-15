@@ -40,6 +40,8 @@ pub enum TokenKind {
     Let,
     /// "begin"
     Begin,
+    /// "letrec"
+    Letrec,
     /// "in"
     In,
     /// "end"
@@ -141,6 +143,7 @@ pub fn as_keyword(str: &str) -> Option<TokenKind> {
         "fun" => TokenKind::Fun,
         "let" => TokenKind::Let,
         "begin" => TokenKind::Begin,
+        "letrec" => TokenKind::Letrec,
         "in" => TokenKind::In,
         "end" => TokenKind::End,
         "case" => TokenKind::Case,

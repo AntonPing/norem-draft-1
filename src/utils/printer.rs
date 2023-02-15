@@ -129,21 +129,19 @@ impl Display for Expr {
                 let args = args.iter().format(&", ");
                 write!(f, "{cons}({args})")
             }
-            Expr::Let {
-                bind, expr, cont, ..
-            } => {
-                write!(f, "let {bind} = {expr};{NWLN}{cont}")
+            Expr::Begin { block, .. } => {
+                write!(f, "begin{INDT}{NWLN}")?;
+                write!(f, "{block}")?;
+                write!(f, "{DEDT}{NWLN}end")
             }
-            Expr::Blk { decls, cont, .. } => {
-                if decls.is_empty() {
-                    write!(f, "begin{INDT}{NWLN}{cont}{DEDT}{NWLN}end")
-                } else {
-                    write!(f, "begin{INDT}")?;
-                    for decl in decls {
-                        write!(f, "{NWLN}{decl}")?;
-                    }
-                    write!(f, "{DEDT}{NWLN}in{INDT}{NWLN}{cont}{DEDT}{NWLN}end")
+            Expr::Letrec { decls, block, .. } => {
+                write!(f, "letrec{INDT}")?;
+                for decl in decls {
+                    write!(f, "{NWLN}{decl}")?;
                 }
+                write!(f, "{DEDT}{NWLN}in{INDT}{NWLN}")?;
+                write!(f, "{block}")?;
+                write!(f, "{DEDT}{NWLN}end")
             }
             Expr::Case { expr, rules, .. } => {
                 // Void can't be defined by user
@@ -153,6 +151,48 @@ impl Display for Expr {
                     write!(f, "{NWLN}| {rule}")?;
                 }
                 write!(f, "{NWLN}end")
+            }
+        }
+    }
+}
+
+impl Display for Block {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let Block { stmts, retn, .. } = self;
+        let mut first = true;
+        for stmt in stmts {
+            if first {
+                first = false;
+                write!(f, "{stmt}")?;
+            } else {
+                write!(f, "{NWLN}{stmt}")?;
+            }
+        }
+        if let Some(retn) = retn {
+            if first {
+                write!(f, "{retn}")?;
+            } else {
+                write!(f, "{NWLN}{retn}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Display for Stmt {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Stmt::Bind {
+                bind, typ, expr, ..
+            } => {
+                if let Some(typ) = typ {
+                    write!(f, "let {bind} : {typ} = {expr};")
+                } else {
+                    write!(f, "let {bind} = {expr};")
+                }
+            }
+            Stmt::Do { expr, .. } => {
+                write!(f, "{expr};")
             }
         }
     }
@@ -185,11 +225,7 @@ impl Display for Pattern {
 impl Display for Rule {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Rule { patn, body, .. } = self;
-        if body.is_simple() {
-            write!(f, "{patn} => {body}")
-        } else {
-            write!(f, "{patn} => {INDT}{NWLN}{body}{DEDT}{NWLN}")
-        }
+        write!(f, "{patn} => {body}")
     }
 }
 
@@ -212,11 +248,7 @@ impl Display for Decl {
                 name, pars, body, ..
             } => {
                 let pars = pars.iter().format(&", ");
-                if body.is_simple() {
-                    write!(f, "fun {name}({pars}) = {body};")
-                } else {
-                    write!(f, "fun {name}({pars}) ={INDT}{NWLN}{body}{DEDT}")
-                }
+                write!(f, "fun {name}({pars}) = {body};")
             }
             Decl::Data {
                 name, pars, vars, ..

@@ -93,20 +93,18 @@ pub enum Expr {
         args: Vec<Expr>,
         span: Span,
     },
-    Let {
-        bind: Ident,
-        expr: Box<Expr>,
-        cont: Box<Expr>,
-        span: Span,
-    },
     Case {
         expr: Box<Expr>,
         rules: Vec<Rule>,
         span: Span,
     },
-    Blk {
+    Begin {
+        block: Box<Block>,
+        span: Span,
+    },
+    Letrec {
         decls: Vec<Decl>,
-        cont: Box<Expr>,
+        block: Box<Block>,
         span: Span,
     },
 }
@@ -121,9 +119,9 @@ impl Spanned for Expr {
             Expr::App { span, .. } => span,
             Expr::ExtCall { span, .. } => span,
             Expr::Cons { span, .. } => span,
-            Expr::Let { span, .. } => span,
             Expr::Case { span, .. } => span,
-            Expr::Blk { span, .. } => span,
+            Expr::Begin { span, .. } => span,
+            Expr::Letrec { span, .. } => span,
         }
     }
     fn span_mut(&mut self) -> &mut Span {
@@ -135,26 +133,54 @@ impl Spanned for Expr {
             Expr::App { span, .. } => span,
             Expr::ExtCall { span, .. } => span,
             Expr::Cons { span, .. } => span,
-            Expr::Let { span, .. } => span,
             Expr::Case { span, .. } => span,
-            Expr::Blk { span, .. } => span,
+            Expr::Begin { span, .. } => span,
+            Expr::Letrec { span, .. } => span,
         }
     }
 }
 
-impl Expr {
-    pub fn is_simple(&self) -> bool {
+#[derive(Clone, Debug, PartialEq)]
+pub struct Block {
+    pub stmts: Vec<Stmt>,
+    pub retn: Option<Expr>,
+    pub span: Span,
+}
+
+impl Spanned for Block {
+    fn span(&self) -> &Span {
+        &self.span
+    }
+    fn span_mut(&mut self) -> &mut Span {
+        &mut self.span
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Stmt {
+    Bind {
+        bind: Ident,
+        typ: Option<Type>,
+        expr: Expr,
+        span: Span,
+    },
+    Do {
+        expr: Expr,
+        span: Span,
+    },
+}
+
+impl Spanned for Stmt {
+    fn span(&self) -> &Span {
         match self {
-            Expr::Lit { .. } => true,
-            Expr::Var { .. } => true,
-            Expr::Prim { .. } => true,
-            Expr::Fun { .. } => true,
-            Expr::App { .. } => true,
-            Expr::ExtCall { .. } => true,
-            Expr::Cons { .. } => true,
-            Expr::Let { .. } => false,
-            Expr::Case { .. } => false,
-            Expr::Blk { .. } => false,
+            Stmt::Bind { span, .. } => span,
+            Stmt::Do { span, .. } => span,
+        }
+    }
+    fn span_mut(&mut self) -> &mut Span {
+        match self {
+            Stmt::Bind { span, .. } => span,
+            Stmt::Do { span, .. } => span,
         }
     }
 }

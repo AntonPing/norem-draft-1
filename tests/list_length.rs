@@ -5,7 +5,7 @@ extern crate norem;
 use norem::utils::driver;
 
 #[test]
-fn tets_list_length() {
+fn test_list_length() {
     let input = PathBuf::from("examples/list_length.nrm");
     let library = PathBuf::from("examples/list_length.c");
     let temp = PathBuf::from("target/examples/list_length.temp.c");

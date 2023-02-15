@@ -70,6 +70,14 @@ impl<'src> Parser<'src> {
         tok
     }
 
+    fn backup(&self) -> usize {
+        self.cursor
+    }
+
+    fn recover(&mut self, rec: usize) {
+        self.cursor = rec;
+    }
+
     fn err_unexpected(&mut self, token: TokenKind) -> ParseError {
         let Token { kind, span } = self.peek_token();
         ParseError::Unexpected(*span, *kind, token)
@@ -370,46 +378,31 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
             let span = Span::new(start, p.end_pos());
             Ok(Expr::Fun { pars, body, span })
         }
-        TokenKind::Let => {
-            p.match_token(TokenKind::Let).unwrap();
-            let bind = p.match_lower_ident()?;
-            p.match_token(TokenKind::Equal)?;
-            let expr = Box::new(parse_expr(p)?);
-            p.match_token(TokenKind::Semi)?;
-            let cont = Box::new(parse_expr(p)?);
+
+        TokenKind::Begin => {
+            p.match_token(TokenKind::Begin).unwrap();
+            let block = Box::new(parse_block(p)?);
+            p.match_token(TokenKind::End)?;
             let span = Span::new(start, p.end_pos());
-            Ok(Expr::Let {
-                bind,
-                expr,
-                cont,
-                span,
-            })
+            Ok(Expr::Begin { block, span })
         }
         TokenKind::Case => {
             p.match_token(TokenKind::Case).unwrap();
             let expr = Box::new(parse_expr(p)?);
             p.match_token(TokenKind::Of)?;
-            let rules = p.many1(|p| {
-                p.match_token(TokenKind::Bar)?;
-                parse_rule(p)
-            })?;
+            let rules = p.many1(parse_rule)?;
             p.match_token(TokenKind::End)?;
             let span = Span::new(start, p.end_pos());
             Ok(Expr::Case { expr, rules, span })
         }
-        TokenKind::Begin => {
-            p.match_token(TokenKind::Begin).unwrap();
-            let decls = p
-                .option(|p| {
-                    let decls = p.many(parse_decl)?;
-                    p.match_token(TokenKind::In)?;
-                    Ok(decls)
-                })?
-                .unwrap_or(Vec::new());
-            let cont = Box::new(parse_expr(p)?);
+        TokenKind::Letrec => {
+            p.match_token(TokenKind::Letrec).unwrap();
+            let decls = p.many(parse_decl)?;
+            p.match_token(TokenKind::In)?;
+            let block = Box::new(parse_block(p)?);
             p.match_token(TokenKind::End)?;
             let span = Span::new(start, p.end_pos());
-            Ok(Expr::Blk { decls, cont, span })
+            Ok(Expr::Letrec { decls, block, span })
         }
         TokenKind::LParen => {
             p.match_token(TokenKind::LParen).unwrap();
@@ -440,6 +433,48 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
                 TokenKind::LParen,
             ];
             Err(p.err_unexpected_many(VEC))
+        }
+    }
+}
+
+fn parse_block(p: &mut Parser) -> ParseResult<Block> {
+    let start = p.start_pos();
+    let stmts = p.many(parse_stmt)?;
+    let retn = p.option(|p| parse_expr(p))?;
+    let span = Span::new(start, p.end_pos());
+    Ok(Block { stmts, retn, span })
+}
+
+fn parse_stmt(p: &mut Parser) -> ParseResult<Stmt> {
+    let rec = p.backup();
+    let start = p.start_pos();
+    match p.peek_first() {
+        TokenKind::Let => {
+            p.match_token(TokenKind::Let).unwrap();
+            let bind = p.match_lower_ident()?;
+            let typ = p.option(|p| {
+                p.match_token(TokenKind::Colon)?;
+                parse_type(p)
+            })?;
+            p.match_token(TokenKind::Equal)?;
+            let expr = parse_expr(p)?;
+            p.match_token(TokenKind::Semi)?;
+            let span = Span::new(start, p.end_pos());
+            Ok(Stmt::Bind {
+                bind,
+                typ,
+                expr,
+                span,
+            })
+        }
+        _ => {
+            let expr = parse_expr(p)?;
+            p.match_token(TokenKind::Semi).map_err(|err| {
+                p.recover(rec);
+                err
+            })?;
+            let span = Span::new(start, p.end_pos());
+            Ok(Stmt::Do { expr, span })
         }
     }
 }
@@ -498,11 +533,10 @@ fn parse_pattern(p: &mut Parser) -> ParseResult<Pattern> {
 
 fn parse_rule(p: &mut Parser) -> ParseResult<Rule> {
     let start = p.start_pos();
+    p.match_token(TokenKind::Bar)?;
     let patn = parse_pattern(p)?;
     p.match_token(TokenKind::EArrow)?;
-    p.match_token(TokenKind::LBrace)?;
     let body = parse_expr(p)?;
-    p.match_token(TokenKind::RBrace)?;
     let span = Span::new(start, p.end_pos());
     Ok(Rule { patn, body, span })
 }
@@ -674,7 +708,7 @@ fn parse_type(p: &mut Parser) -> ParseResult<Type> {
 #[test]
 fn parser_test() {
     let string = r#"
-begin
+letrec
     extern print_int : fun(Int) -> ();
     type My-Int = Int;
     type Option-Int = Option[Int];
@@ -683,20 +717,23 @@ begin
     | None
     end
     fun add1(x) => @iadd(x, 1)
-    fun add2(x) =>
+    fun add2(x) => begin
+        #print_int(x);
+        let y: Int = @iadd(x,1);
+        #print_int(y);
+        @iadd(y,1)
+    end
+    fun const-3(x) => begin
         let y = @iadd(x,1);
         @iadd(y,1)
-    fun const-3(x) => {
-        let y = @iadd(x,1);
-        @iadd(y,1)
-    }
+    end
     fun option-add1(x) =>
         case x of
-        | Some(y) => { Some(@iadd(x,1)) }
-        | None => { None }
+        | Some(y) => Some(@iadd(x,1))
+        | None => None
         end
 in
-    @isub(addone(42), 1)
+    @isub(add1(42), 1)
 end
 "#;
 
@@ -704,5 +741,5 @@ end
     let res = parse_expr(&mut par);
     // println!("{res:?}");
     assert!(res.is_ok());
-    println!("{}", res.unwrap());
+    // println!("{}", res.unwrap());
 }

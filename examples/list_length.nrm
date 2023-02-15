@@ -1,18 +1,16 @@
-begin
+letrec
     extern print_int : fun(Int) -> ();
     extern scan_int : fun() -> Int;
     data List[T] =
     | Cons(T,List[T])
     | Nil
     end
-    fun length(lst) => {
+    fun length(lst) =>
         case lst of
-        | Cons(head,tail) => {
+        | Cons(head,tail) =>
             @iadd(length(tail),1)
-        }
-        | Nil => { 0 }
+        | Nil => 0
         end
-    }
 in
     let l = length(Cons(1,Cons(2,Cons(3,Cons(4,Cons(5,Nil))))));
     #print_int(l)

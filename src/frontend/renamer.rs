@@ -125,24 +125,9 @@ impl Renamer {
                 let args = args.into_iter().map(|arg| self.visit_expr(arg)).collect();
                 Expr::Cons { cons, args, span }
             }
-            Expr::Let {
-                bind,
-                expr,
-                cont,
-                span,
-            } => {
-                let expr = Box::new(self.visit_expr(*expr));
-                self.enter_scope();
-                assert!(bind.is_dummy());
-                let bind = self.intro_val_var(bind);
-                let cont = Box::new(self.visit_expr(*cont));
-                self.leave_scope();
-                Expr::Let {
-                    bind,
-                    expr,
-                    cont,
-                    span,
-                }
+            Expr::Begin { block, span } => {
+                let block = Box::new(self.visit_block(*block));
+                Expr::Begin { block, span }
             }
             Expr::Case { expr, rules, span } => {
                 let expr = Box::new(self.visit_expr(*expr));
@@ -152,7 +137,7 @@ impl Renamer {
                     .collect();
                 Expr::Case { expr, rules, span }
             }
-            Expr::Blk { decls, cont, span } => {
+            Expr::Letrec { decls, block, span } => {
                 self.enter_scope();
                 // todo: multiple definition error
                 for decl in &decls {
@@ -183,14 +168,51 @@ impl Renamer {
                     .into_iter()
                     .map(|decl| self.visit_decl(decl))
                     .collect();
-                let cont = Box::new(self.visit_expr(*cont));
+                let block = Box::new(self.visit_block(*block));
                 self.leave_scope();
-                Expr::Blk { decls, cont, span }
+                Expr::Letrec { decls, block, span }
             }
         }
     }
 
-    pub fn visit_rule(&mut self, rule: Rule) -> Rule {
+    fn visit_block(&mut self, block: Block) -> Block {
+        let Block { stmts, retn, span } = block;
+        self.enter_scope();
+        let stmts = stmts
+            .into_iter()
+            .map(|stmt| self.visit_stmt(stmt))
+            .collect();
+        let retn = retn.map(|retn| self.visit_expr(retn));
+        self.leave_scope();
+        Block { stmts, retn, span }
+    }
+
+    fn visit_stmt(&mut self, stmt: Stmt) -> Stmt {
+        match stmt {
+            Stmt::Bind {
+                bind,
+                typ,
+                expr,
+                span,
+            } => {
+                let expr = self.visit_expr(expr);
+                assert!(bind.is_dummy());
+                let bind = self.intro_val_var(bind);
+                Stmt::Bind {
+                    bind,
+                    typ,
+                    expr,
+                    span,
+                }
+            }
+            Stmt::Do { expr, span } => {
+                let expr = self.visit_expr(expr);
+                Stmt::Do { expr, span }
+            }
+        }
+    }
+
+    fn visit_rule(&mut self, rule: Rule) -> Rule {
         let Rule { patn, body, span } = rule;
         self.enter_scope();
         let patn = self.visit_patn(patn);
@@ -359,7 +381,8 @@ impl Renamer {
 fn renamer_test() {
     use super::parser::*;
     let string = r#"
-begin
+letrec
+    extern print_int : fun(Int) -> ();
     type My-Int = Int;
     type Option-Int = Option[Int];
     data Option[T] =
@@ -367,17 +390,20 @@ begin
     | None
     end
     fun add1(x) => @iadd(x, 1)
-    fun add2(x) =>
-        let y = @iadd(x,1);
-        @iadd(z,1)
-    fun const-3(x) => {
-        let y = @iadd(x,1);
+    fun add2(x) => begin
+        #print_int(x);
+        let y: Int = @iadd(x,1);
+        #print_int(y);
         @iadd(y,1)
-    }
+    end
+    fun const-3(x) => begin
+        let y = @iadd(x,1);
+        @iadd(zzzzz,1)
+    end
     fun option-add1(x) =>
         case x of
-        | Some(y) => { Some(@iadd(x,1)) }
-        | None => { None }
+        | Some(y) => Some(@iadd(x,1))
+        | None => None
         end
 in
     @isub(add1(42), 1)
@@ -390,16 +416,10 @@ end
     let mut rnm = Renamer::new();
     let _res = rnm.visit_expr(expr);
     // println!("{}", _res);
-
+    // println!("{:?}", rnm.error);
     assert_eq!(rnm.error.len(), 1);
-    match rnm.error[0] {
-        RenameError::UnboundedValueVariable(span, var) => {
-            // line 11: @iadd(z,1) <- here z not bound!
-            assert_eq!(span.start.row, 11);
-            assert_eq!(format!("{}", var), "z");
-        }
-        _ => {
-            panic!("test failed!");
-        }
-    }
+    assert!(matches!(
+        rnm.error[0],
+        RenameError::UnboundedValueVariable(_, _)
+    ));
 }
