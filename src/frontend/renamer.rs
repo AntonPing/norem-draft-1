@@ -32,6 +32,16 @@ impl Renamer {
         }
     }
 
+    pub fn run(expr: &mut Expr) -> Result<(), Vec<RenameError>> {
+        let mut pass = Renamer::new();
+        pass.visit_expr(expr);
+        if pass.error.is_empty() {
+            Ok(())
+        } else {
+            Err(pass.error)
+        }
+    }
+
     fn enter_scope(&mut self) {
         self.val_map.enter_scope();
         self.typ_map.enter_scope();
@@ -44,116 +54,121 @@ impl Renamer {
         self.cons_map.leave_scope();
     }
 
-    fn intro_val_var(&mut self, var: Ident) -> Ident {
+    fn intro_val_var(&mut self, var: &mut Ident) {
         let ident = var.uniquify();
-        self.val_map.insert(var, ident);
-        ident
+        self.val_map.insert(*var, ident);
+        *var = ident;
     }
 
-    fn intro_typ_var(&mut self, var: Ident) -> Ident {
+    fn intro_typ_var(&mut self, var: &mut Ident) {
         let ident = var.uniquify();
-        self.typ_map.insert(var, ident);
-        ident
+        self.typ_map.insert(*var, ident);
+        *var = ident;
     }
 
-    fn intro_cons_var(&mut self, var: Ident) -> Ident {
+    fn intro_cons_var(&mut self, var: &mut Ident) {
         let ident = var.uniquify();
-        self.cons_map.insert(var, ident);
-        ident
+        self.cons_map.insert(*var, ident);
+        *var = ident;
     }
 
-    fn lookup_val_var(&mut self, ident: Ident) -> Option<Ident> {
+    fn lookup_val_var(&mut self, ident: &Ident) -> Option<Ident> {
         self.val_map.get(&ident).copied()
     }
 
-    fn lookup_typ_var(&mut self, ident: Ident) -> Option<Ident> {
+    fn lookup_typ_var(&mut self, ident: &Ident) -> Option<Ident> {
         self.typ_map.get(&ident).copied()
     }
 
-    fn lookup_cons_var(&mut self, ident: Ident) -> Option<Ident> {
+    fn lookup_cons_var(&mut self, ident: &Ident) -> Option<Ident> {
         self.cons_map.get(&ident).copied()
     }
 
-    pub fn visit_expr(&mut self, expr: Expr) -> Expr {
+    fn visit_expr(&mut self, expr: &mut Expr) {
         match expr {
-            Expr::Lit { lit, span } => Expr::Lit { lit, span },
+            Expr::Lit { .. } => {}
             Expr::Var { var, span } => {
-                assert!(var.is_dummy());
-                let var = self.lookup_val_var(var).unwrap_or_else(|| {
+                if let Some(var2) = self.lookup_val_var(var) {
+                    *var = var2;
+                } else {
                     self.error
-                        .push(RenameError::UnboundedValueVariable(span, var));
-                    var
-                });
-                Expr::Var { var, span }
+                        .push(RenameError::UnboundedValueVariable(*span, *var));
+                }
             }
-            Expr::Prim { prim, args, span } => {
-                let args = args.into_iter().map(|arg| self.visit_expr(arg)).collect();
-                Expr::Prim { prim, args, span }
+            Expr::Prim { prim: _, args, .. } => {
+                args.iter_mut().for_each(|arg| self.visit_expr(arg));
             }
-            Expr::Fun { pars, body, span } => {
+            Expr::Fun { pars, body, .. } => {
                 self.enter_scope();
-                let pars: Vec<Ident> = pars
-                    .into_iter()
-                    .map(|par| {
-                        assert!(par.is_dummy());
-                        self.intro_val_var(par)
-                    })
-                    .collect();
-                let body = Box::new(self.visit_expr(*body));
+                pars.iter_mut().for_each(|par| {
+                    assert!(par.is_dummy());
+                    self.intro_val_var(par)
+                });
+                self.visit_expr(&mut *body);
                 self.leave_scope();
-                Expr::Fun { pars, body, span }
             }
-            Expr::App { func, args, span } => {
-                let func = Box::new(self.visit_expr(*func));
-                let args = args.into_iter().map(|arg| self.visit_expr(arg)).collect();
-                Expr::App { func, args, span }
+            Expr::App { func, args, .. } => {
+                self.visit_expr(&mut *func);
+                args.iter_mut().for_each(|arg| self.visit_expr(arg));
             }
             Expr::ExtCall { func, args, span } => {
                 if !self.ext_set.contains(&func) {
                     self.error
-                        .push(RenameError::UndefinedExternalFunction(span, func))
+                        .push(RenameError::UndefinedExternalFunction(*span, *func))
                 }
-                let args = args.into_iter().map(|arg| self.visit_expr(arg)).collect();
-                Expr::ExtCall { func, args, span }
+                args.iter_mut().for_each(|arg| self.visit_expr(arg));
             }
             Expr::Cons { cons, args, span } => {
-                let cons = self.lookup_cons_var(cons).unwrap_or_else(|| {
+                if let Some(cons2) = self.lookup_cons_var(cons) {
+                    *cons = cons2;
+                } else {
                     self.error
-                        .push(RenameError::UnboundedConstructorVariable(span, cons));
-                    cons
-                });
-                let args = args.into_iter().map(|arg| self.visit_expr(arg)).collect();
-                Expr::Cons { cons, args, span }
+                        .push(RenameError::UnboundedConstructorVariable(*span, *cons));
+                }
+                args.iter_mut().for_each(|arg| self.visit_expr(arg));
             }
-            Expr::Begin { block, span } => {
-                let block = Box::new(self.visit_block(*block));
-                Expr::Begin { block, span }
+            Expr::Begin { block, .. } => {
+                self.visit_block(&mut *block);
             }
-            Expr::Case { expr, rules, span } => {
-                let expr = Box::new(self.visit_expr(*expr));
-                let rules = rules
-                    .into_iter()
-                    .map(|rule| self.visit_rule(rule))
-                    .collect();
-                Expr::Case { expr, rules, span }
+            Expr::Case { expr, rules, .. } => {
+                self.visit_expr(&mut *expr);
+                rules.iter_mut().for_each(|rule| self.visit_rule(rule));
             }
             Expr::Letrec { decls, block, span } => {
                 self.enter_scope();
-                // todo: multiple definition error
-                for decl in &decls {
+                let mut name_set: HashSet<Ident> = HashSet::new();
+                for decl in decls.iter_mut() {
                     assert!(decl.get_name().is_dummy());
                     match decl {
                         Decl::Func { name, .. } => {
-                            self.intro_val_var(*name);
+                            if name_set.contains(name) {
+                                self.error
+                                    .push(RenameError::MultipuleDefinition(*span, *name));
+                            } else {
+                                name_set.insert(*name);
+                            }
+                            self.intro_val_var(name);
                         }
                         Decl::Data { name, vars, .. } => {
-                            self.intro_typ_var(*name);
+                            if name_set.contains(name) {
+                                self.error
+                                    .push(RenameError::MultipuleDefinition(*span, *name));
+                            } else {
+                                name_set.insert(*name);
+                            }
+                            self.intro_typ_var(name);
                             for var in vars {
-                                self.intro_cons_var(var.cons);
+                                self.intro_cons_var(&mut var.cons);
                             }
                         }
                         Decl::Type { name, .. } => {
-                            self.intro_typ_var(*name);
+                            if name_set.contains(name) {
+                                self.error
+                                    .push(RenameError::MultipuleDefinition(*span, *name));
+                            } else {
+                                name_set.insert(*name);
+                            }
+                            self.intro_typ_var(name);
                         }
                         Decl::Extern { name, span, .. } => {
                             if self.ext_set.contains(&name) {
@@ -164,214 +179,135 @@ impl Renamer {
                         }
                     }
                 }
-                let decls = decls
-                    .into_iter()
-                    .map(|decl| self.visit_decl(decl))
-                    .collect();
-                let block = Box::new(self.visit_block(*block));
+                decls.iter_mut().for_each(|decl| self.visit_decl(decl));
+                self.visit_block(&mut *block);
                 self.leave_scope();
-                Expr::Letrec { decls, block, span }
             }
         }
     }
 
-    fn visit_block(&mut self, block: Block) -> Block {
-        let Block { stmts, retn, span } = block;
+    fn visit_block(&mut self, block: &mut Block) {
+        let Block { stmts, retn, .. } = block;
         self.enter_scope();
-        let stmts = stmts
-            .into_iter()
-            .map(|stmt| self.visit_stmt(stmt))
-            .collect();
-        let retn = retn.map(|retn| self.visit_expr(retn));
+        stmts.iter_mut().for_each(|stmt| self.visit_stmt(stmt));
+        retn.as_mut().map(|retn| self.visit_expr(retn));
         self.leave_scope();
-        Block { stmts, retn, span }
     }
 
-    fn visit_stmt(&mut self, stmt: Stmt) -> Stmt {
+    fn visit_stmt(&mut self, stmt: &mut Stmt) {
         match stmt {
-            Stmt::Bind {
-                bind,
-                typ,
-                expr,
-                span,
-            } => {
-                let expr = self.visit_expr(expr);
-                assert!(bind.is_dummy());
-                let bind = self.intro_val_var(bind);
-                Stmt::Bind {
-                    bind,
-                    typ,
-                    expr,
-                    span,
-                }
+            Stmt::Bind { bind, expr, .. } => {
+                self.visit_expr(expr);
+                self.intro_val_var(bind);
             }
-            Stmt::Do { expr, span } => {
-                let expr = self.visit_expr(expr);
-                Stmt::Do { expr, span }
+            Stmt::Do { expr, .. } => {
+                self.visit_expr(expr);
             }
         }
     }
 
-    fn visit_rule(&mut self, rule: Rule) -> Rule {
-        let Rule { patn, body, span } = rule;
+    fn visit_rule(&mut self, rule: &mut Rule) {
+        let Rule { patn, body, .. } = rule;
         self.enter_scope();
-        let patn = self.visit_patn(patn);
-        let body = self.visit_expr(body);
+        self.visit_patn(patn);
+        self.visit_expr(body);
         self.leave_scope();
-        Rule { patn, body, span }
     }
 
-    pub fn visit_patn(&mut self, patn: Pattern) -> Pattern {
+    fn visit_patn(&mut self, patn: &mut Pattern) {
         match patn {
-            Pattern::Var { var, span } => {
-                assert!(var.is_dummy());
-                let var = self.intro_val_var(var);
-                Pattern::Var { var, span }
+            Pattern::Var { var, .. } => {
+                self.intro_val_var(var);
             }
-            Pattern::Lit { lit, span } => Pattern::Lit { lit, span },
+            Pattern::Lit { .. } => {}
             Pattern::Cons { cons, pars, span } => {
-                assert!(cons.is_dummy());
-                let cons = self.lookup_cons_var(cons).unwrap_or_else(|| {
+                if let Some(cons2) = self.lookup_cons_var(cons) {
+                    *cons = cons2;
+                } else {
                     self.error
-                        .push(RenameError::UnboundedConstructorVariable(span, cons));
-                    cons.uniquify()
-                });
-                let pars = pars.into_iter().map(|par| self.visit_patn(par)).collect();
-                Pattern::Cons { cons, pars, span }
+                        .push(RenameError::UnboundedConstructorVariable(*span, *cons));
+                }
+                pars.iter_mut().for_each(|par| self.visit_patn(par));
             }
-            Pattern::Wild { span } => Pattern::Wild { span },
+            Pattern::Wild { .. } => {}
         }
     }
 
-    pub fn visit_decl(&mut self, decl: Decl) -> Decl {
+    fn visit_decl(&mut self, decl: &mut Decl) {
         match decl {
             Decl::Func {
-                name,
+                name: _,
                 pars,
                 body,
-                span,
+                ..
             } => {
                 self.enter_scope();
-                let name = self.lookup_val_var(name).unwrap_or_else(|| {
-                    self.error
-                        .push(RenameError::UnboundedValueVariable(span, name));
-                    name.uniquify()
-                });
-                let pars = pars
-                    .into_iter()
-                    .map(|par| self.intro_val_var(par))
-                    .collect();
-                let body = Box::new(self.visit_expr(*body));
+                // self.intro_val_var(name);
+                pars.iter_mut().for_each(|par| self.intro_val_var(par));
+                self.visit_expr(&mut *body);
                 self.leave_scope();
-                Decl::Func {
-                    name,
-                    pars,
-                    body,
-                    span,
-                }
             }
             Decl::Data {
-                name,
+                name: _,
                 pars,
                 vars,
-                span,
+                ..
             } => {
                 self.enter_scope();
-                let name = self.lookup_typ_var(name).unwrap();
-                let pars = pars
-                    .into_iter()
-                    .map(|par| self.intro_typ_var(par))
-                    .collect();
-                let vars = vars
-                    .into_iter()
-                    .map(|var| self.visit_varient(var))
-                    .collect();
+                // self.intro_typ_var(name);
+                pars.iter_mut().for_each(|par| self.intro_typ_var(par));
+                vars.iter_mut().for_each(|var| self.visit_varient(var));
                 self.leave_scope();
-                Decl::Data {
-                    name,
-                    pars,
-                    vars,
-                    span,
-                }
             }
             Decl::Type {
-                name,
-                pars,
-                typ,
-                span,
+                name: _, pars, typ, ..
             } => {
                 self.enter_scope();
-                let name = self.lookup_typ_var(name).unwrap();
-                let pars = pars
-                    .into_iter()
-                    .map(|par| self.intro_typ_var(par))
-                    .collect();
-                let typ = self.visit_type(typ);
+                // self.intro_typ_var(name);
+                pars.iter_mut().for_each(|par| self.intro_typ_var(par));
+                self.visit_type(typ);
                 self.leave_scope();
-                Decl::Type {
-                    name,
-                    pars,
-                    typ,
-                    span,
-                }
             }
             Decl::Extern {
-                name,
-                pars,
-                typ,
-                span,
+                name: _, pars, typ, ..
             } => {
                 self.enter_scope();
-                let pars = pars
-                    .into_iter()
-                    .map(|par| self.intro_typ_var(par))
-                    .collect();
-                let typ = self.visit_type(typ);
+                pars.iter_mut().for_each(|par| self.intro_typ_var(par));
+                self.visit_type(typ);
                 self.leave_scope();
-                Decl::Extern {
-                    name,
-                    pars,
-                    typ,
-                    span,
-                }
             }
         }
     }
 
-    pub fn visit_varient(&mut self, var: Varient) -> Varient {
-        let Varient { cons, pars, span } = var;
-        assert!(cons.is_dummy());
-        let cons = self.lookup_cons_var(cons).unwrap();
-        let pars = pars.into_iter().map(|par| self.visit_type(par)).collect();
-        Varient { cons, pars, span }
+    fn visit_varient(&mut self, var: &mut Varient) {
+        let Varient { cons: _, pars, .. } = var;
+        // self.intro_cons_var(cons);
+        pars.iter_mut().for_each(|par| self.visit_type(par));
     }
 
-    pub fn visit_type(&mut self, typ: Type) -> Type {
+    fn visit_type(&mut self, typ: &mut Type) {
         match typ {
-            Type::Lit { lit, span } => Type::Lit { lit, span },
+            Type::Lit { .. } => {}
             Type::Var { var, span } => {
-                assert!(var.is_dummy());
-                let var = self.lookup_typ_var(var).unwrap_or_else(|| {
+                if let Some(var2) = self.lookup_typ_var(var) {
+                    *var = var2;
+                } else {
                     self.error
-                        .push(RenameError::UnboundedTypeVariable(span, var));
-                    var.uniquify()
-                });
-                Type::Var { var, span }
+                        .push(RenameError::UnboundedTypeVariable(*span, *var));
+                }
             }
-            Type::Fun { pars, res, span } => {
-                let pars = pars.into_iter().map(|par| self.visit_type(par)).collect();
-                let res = Box::new(self.visit_type(*res));
-                Type::Fun { pars, res, span }
+            Type::Fun { pars, res, .. } => {
+                pars.iter_mut().for_each(|par| self.visit_type(par));
+                self.visit_type(&mut *res);
             }
             Type::App { cons, args, span } => {
-                assert!(cons.is_dummy());
-                let cons = self.lookup_typ_var(cons).unwrap_or_else(|| {
+                if let Some(cons2) = self.lookup_typ_var(cons) {
+                    *cons = cons2;
+                } else {
                     self.error
-                        .push(RenameError::UnboundedTypeVariable(span, cons));
-                    cons.uniquify()
-                });
-                let args = args.into_iter().map(|arg| self.visit_type(arg)).collect();
-                Type::App { cons, args, span }
+                        .push(RenameError::UnboundedTypeVariable(*span, *cons));
+                }
+                args.iter_mut().for_each(|arg| self.visit_type(arg));
             }
         }
     }
@@ -411,15 +347,14 @@ end
 "#;
 
     let mut par = Parser::new(string);
-    let expr = parse_expr(&mut par).unwrap();
+    let mut expr = parse_expr(&mut par).unwrap();
     // println!("{}", expr);
-    let mut rnm = Renamer::new();
-    let _res = rnm.visit_expr(expr);
-    // println!("{}", _res);
-    // println!("{:?}", rnm.error);
-    assert_eq!(rnm.error.len(), 1);
+    let err = Renamer::run(&mut expr);
+    // println!("{:?}", err);
+    assert!(err.is_err());
+    assert_eq!(err.as_ref().unwrap_err().len(), 1);
     assert!(matches!(
-        rnm.error[0],
+        err.unwrap_err()[0],
         RenameError::UnboundedValueVariable(_, _)
     ));
 }

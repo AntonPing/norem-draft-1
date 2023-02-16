@@ -444,13 +444,12 @@ combi
 "#;
 
     let mut par = Parser::new(string);
-    let expr = parse_expr(&mut par).unwrap();
+    let mut expr = parse_expr(&mut par).unwrap();
     println!("{}", expr);
-    let mut rnm = Renamer::new();
-    let res = rnm.visit_expr(expr);
-    println!("{}", res);
+    Renamer::run(&mut expr).unwrap();
+    println!("{}", expr);
     let mut tych = Infer::new();
-    tych.infer_expr(&res).unwrap();
+    tych.infer_expr(&expr).unwrap();
     for (k, v) in tych.val_env.iter() {
         println!("{k} : {v}");
     }

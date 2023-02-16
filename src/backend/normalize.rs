@@ -747,9 +747,8 @@ fn normalize_test() {
 @iadd(@iadd(1,2),@iadd(3,4))
     "#;
     let mut par = Parser::new(string);
-    let expr1 = parse_expr(&mut par).unwrap();
-    let mut rnm = Renamer::new();
-    let expr1 = rnm.visit_expr(expr1);
+    let mut expr1 = parse_expr(&mut par).unwrap();
+    Renamer::run(&mut expr1).unwrap();
     let expr1 = Normalize::run(&expr1);
     let expr2 = chain(vec![
         _move("x1", i(4)),
@@ -772,9 +771,8 @@ fn normalize_test() {
     end
     "#;
     let mut par = Parser::new(string);
-    let expr1 = parse_expr(&mut par).unwrap();
-    let mut rnm = Renamer::new();
-    let expr1 = rnm.visit_expr(expr1);
+    let mut expr1 = parse_expr(&mut par).unwrap();
+    Renamer::run(&mut expr1).unwrap();
     let expr1 = Normalize::run(&expr1);
     let expr2 = let_in(
         vec![fun(
@@ -805,7 +803,7 @@ fn normalize_pattern_match_test() {
     use crate::frontend::parser::*;
     use crate::frontend::renamer::Renamer;
     let string = r#"
-module
+letrec
     data List[T] =
     | Cons(T,List[T])
     | Nil
@@ -820,9 +818,8 @@ in
 end
 "#;
     let mut par = Parser::new(string);
-    let expr1 = parse_expr(&mut par).unwrap();
-    let mut rnm = Renamer::new();
-    let expr1 = rnm.visit_expr(expr1);
+    let mut expr1 = parse_expr(&mut par).unwrap();
+    Renamer::run(&mut expr1).unwrap();
     // println!("{expr1:#?}");
     let _expr1 = Normalize::run(&expr1);
     // println!("{expr1}");
