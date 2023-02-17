@@ -98,6 +98,12 @@ pub enum Expr {
         rules: Vec<Rule>,
         span: Span,
     },
+    Ifte {
+        cond: Box<Expr>,
+        trbr: Box<Expr>,
+        flbr: Box<Expr>,
+        span: Span,
+    },
     Begin {
         block: Box<Block>,
         span: Span,
@@ -120,6 +126,7 @@ impl Spanned for Expr {
             Expr::ExtCall { span, .. } => span,
             Expr::Cons { span, .. } => span,
             Expr::Case { span, .. } => span,
+            Expr::Ifte { span, .. } => span,
             Expr::Begin { span, .. } => span,
             Expr::Letrec { span, .. } => span,
         }
@@ -134,6 +141,7 @@ impl Spanned for Expr {
             Expr::ExtCall { span, .. } => span,
             Expr::Cons { span, .. } => span,
             Expr::Case { span, .. } => span,
+            Expr::Ifte { span, .. } => span,
             Expr::Begin { span, .. } => span,
             Expr::Letrec { span, .. } => span,
         }

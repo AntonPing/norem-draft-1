@@ -134,6 +134,13 @@ impl Renamer {
                 self.visit_expr(&mut *expr);
                 rules.iter_mut().for_each(|rule| self.visit_rule(rule));
             }
+            Expr::Ifte {
+                cond, trbr, flbr, ..
+            } => {
+                self.visit_expr(&mut *cond);
+                self.visit_expr(&mut *trbr);
+                self.visit_expr(&mut *flbr);
+            }
             Expr::Letrec { decls, block, span } => {
                 self.enter_scope();
                 let mut name_set: HashSet<Ident> = HashSet::new();

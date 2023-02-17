@@ -404,19 +404,9 @@ impl Infer {
             } => {
                 todo!()
             }
-            /*
-            Expr::Let {
-                bind, expr, cont, ..
-            } => {
-                self.level += 1;
-                let expr = self.infer_expr(expr)?;
-                self.level -= 1;
-                let expr = self.generalize(&expr);
-                self.val_env.insert(*bind, expr);
-                let cont = self.infer_expr(cont)?;
-                Ok(cont)
+            Expr::Ifte { .. } => {
+                todo!()
             }
-            */
             Expr::Begin { .. } => {
                 todo!()
             }

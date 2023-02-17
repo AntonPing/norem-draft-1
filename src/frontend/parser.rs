@@ -395,6 +395,21 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
             let span = Span::new(start, p.end_pos());
             Ok(Expr::Case { expr, rules, span })
         }
+        TokenKind::If => {
+            p.match_token(TokenKind::If).unwrap();
+            let cond = Box::new(parse_expr(p)?);
+            p.match_token(TokenKind::Then)?;
+            let trbr = Box::new(parse_expr(p)?);
+            p.match_token(TokenKind::Else)?;
+            let flbr = Box::new(parse_expr(p)?);
+            let span = Span::new(start, p.end_pos());
+            Ok(Expr::Ifte {
+                cond,
+                trbr,
+                flbr,
+                span,
+            })
+        }
         TokenKind::Letrec => {
             p.match_token(TokenKind::Letrec).unwrap();
             let decls = p.many(parse_decl)?;

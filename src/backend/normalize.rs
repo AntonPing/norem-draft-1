@@ -314,6 +314,32 @@ impl Normalize {
                 let cont = Box::new(self.compile_match(&mat, hole, ctx));
                 self.normalize(expr, etop, MExpr::LetIn { decls, cont })
             }
+            Expr::Ifte {
+                cond, trbr, flbr, ..
+            } => {
+                /*
+                    normalize(
+                        if cond then trbr else flbr,
+                        hole,
+                        ctx
+                    ) =
+                    normalize(cond, x,
+                        let hole = if x
+                            then normalize_top(trbr)
+                            else normalize_top(flbr);
+                        ctx
+                    )
+                */
+                let x = Ident::generate('x');
+                let cont = MExpr::Ifte {
+                    bind: hole,
+                    arg1: Atom::Var(x),
+                    brch1: Box::new(self.normalize_top(trbr)),
+                    brch2: Box::new(self.normalize_top(flbr)),
+                    cont: Box::new(ctx),
+                };
+                self.normalize(&cond, x, cont)
+            }
             Expr::Letrec { decls, block, .. } => {
                 /*
                     normalize(

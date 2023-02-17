@@ -129,6 +129,19 @@ impl Display for Expr {
                 let args = args.iter().format(&", ");
                 write!(f, "{cons}({args})")
             }
+            Expr::Case { expr, rules, .. } => {
+                assert!(!rules.is_empty());
+                write!(f, "case {expr} of")?;
+                for rule in rules {
+                    write!(f, "{NWLN}| {rule}")?;
+                }
+                write!(f, "{NWLN}end")
+            }
+            Expr::Ifte {
+                cond, trbr, flbr, ..
+            } => {
+                write!(f, "if {cond}{NWLN}then {trbr}{NWLN}else {flbr}")
+            }
             Expr::Begin { block, .. } => {
                 write!(f, "begin{INDT}{NWLN}")?;
                 write!(f, "{block}")?;
@@ -142,15 +155,6 @@ impl Display for Expr {
                 write!(f, "{DEDT}{NWLN}in{INDT}{NWLN}")?;
                 write!(f, "{block}")?;
                 write!(f, "{DEDT}{NWLN}end")
-            }
-            Expr::Case { expr, rules, .. } => {
-                // Void can't be defined by user
-                assert!(!rules.is_empty());
-                write!(f, "case {expr} of")?;
-                for rule in rules {
-                    write!(f, "{NWLN}| {rule}")?;
-                }
-                write!(f, "{NWLN}end")
             }
         }
     }
