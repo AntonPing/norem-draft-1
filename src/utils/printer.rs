@@ -245,10 +245,34 @@ impl Display for Decl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Decl::Func {
-                name, pars, body, ..
+                name,
+                gens,
+                pars,
+                res,
+                body,
+                ..
             } => {
-                let pars = pars.iter().format(&", ");
-                write!(f, "fun {name}({pars}) = {body};")
+                let gens = if gens.is_empty() {
+                    "".to_string()
+                } else {
+                    format!("[{}]", gens.iter().format(&", "))
+                };
+                let pars = pars
+                    .iter()
+                    .map(|(par, typ)| format!("{par}: {typ}"))
+                    .format(&", ");
+                let res = if matches!(
+                    res,
+                    Type::Lit {
+                        lit: LitType::Unit,
+                        ..
+                    }
+                ) {
+                    "".to_string()
+                } else {
+                    format!(": {res}")
+                };
+                write!(f, "fun {name}{gens}({pars}){res} = {body}")
             }
             Decl::Data {
                 name, pars, vars, ..
@@ -280,7 +304,7 @@ impl Display for Decl {
                 name, pars, typ, ..
             } => {
                 let pars = pars.iter().format(&", ");
-                write!(f, "extern {name}({pars}) : {typ};")
+                write!(f, "extern {name}({pars}): {typ};")
             }
         }
     }

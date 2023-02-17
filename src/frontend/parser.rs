@@ -547,15 +547,39 @@ pub fn parse_decl(p: &mut Parser) -> ParseResult<Decl> {
         TokenKind::Fun => {
             p.match_token(TokenKind::Fun).unwrap();
             let name = p.match_lower_ident()?;
+            let gens = p
+                .option(|p| {
+                    p.match_token(TokenKind::LBracket)?;
+                    let gens = p.many1(|p| p.match_upper_ident())?;
+                    p.match_token(TokenKind::RBracket)?;
+                    Ok(gens)
+                })?
+                .unwrap_or(Vec::new());
             p.match_token(TokenKind::LParen)?;
-            let pars = p.sepby(TokenKind::Comma, |p| p.match_lower_ident())?;
+            let pars = p.sepby(TokenKind::Comma, |p| {
+                let par = p.match_lower_ident()?;
+                p.match_token(TokenKind::Colon)?;
+                let typ = parse_type(p)?;
+                Ok((par, typ))
+            })?;
             p.match_token(TokenKind::RParen)?;
-            p.match_token(TokenKind::EArrow)?;
+            let res = p
+                .option(|p| {
+                    p.match_token(TokenKind::Colon)?;
+                    parse_type(p)
+                })?
+                .unwrap_or(Type::Lit {
+                    lit: LitType::Unit,
+                    span: Span::new(p.start_pos(), p.end_pos()),
+                });
+            p.match_token(TokenKind::Equal)?;
             let body = Box::new(parse_expr(p)?);
             let span = Span::new(start, p.end_pos());
             Ok(Decl::Func {
                 name,
+                gens,
                 pars,
+                res,
                 body,
                 span,
             })
@@ -716,18 +740,17 @@ letrec
     | Some(T)
     | None
     end
-    fun add1(x) => @iadd(x, 1)
-    fun add2(x) => begin
+    fun add1(x: Int): Int = @iadd(x, 1)
+    fun add2(x: Int): Int = begin
         #print_int(x);
         let y: Int = @iadd(x,1);
         #print_int(y);
         @iadd(y,1)
     end
-    fun const-3(x) => begin
-        let y = @iadd(x,1);
-        @iadd(y,1)
+    fun const-3[T](x: T): Int = begin
+        3
     end
-    fun option-add1(x) =>
+    fun option-add1(x: Option[Int]): Option[Int] =
         case x of
         | Some(y) => Some(@iadd(x,1))
         | None => None

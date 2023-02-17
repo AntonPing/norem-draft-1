@@ -237,13 +237,22 @@ impl Renamer {
         match decl {
             Decl::Func {
                 name: _,
+                gens,
                 pars,
+                res,
                 body,
                 ..
             } => {
                 self.enter_scope();
                 // self.intro_val_var(name);
-                pars.iter_mut().for_each(|par| self.intro_val_var(par));
+                for gen in gens {
+                    self.intro_typ_var(gen);
+                }
+                pars.iter_mut().for_each(|(par, typ)| {
+                    self.intro_val_var(par);
+                    self.visit_type(typ);
+                });
+                self.visit_type(res);
                 self.visit_expr(&mut *body);
                 self.leave_scope();
             }
@@ -325,18 +334,17 @@ letrec
     | Some(T)
     | None
     end
-    fun add1(x) => @iadd(x, 1)
-    fun add2(x) => begin
+    fun add1(x: Int): Int = @iadd(x, 1)
+    fun add2(x: Int): Int = begin
         #print_int(x);
         let y: Int = @iadd(x,1);
-        #print_int(y);
+        #print_int(zzzzz);
         @iadd(y,1)
     end
-    fun const-3(x) => begin
-        let y = @iadd(x,1);
-        @iadd(zzzzz,1)
+    fun const-3[T](x: T): Int = begin
+        3
     end
-    fun option-add1(x) =>
+    fun option-add1(x: Option[Int]): Option[Int] =
         case x of
         | Some(y) => Some(@iadd(x,1))
         | None => None

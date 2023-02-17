@@ -266,7 +266,9 @@ impl Spanned for Pattern {
 pub enum Decl {
     Func {
         name: Ident,
-        pars: Vec<Ident>,
+        gens: Vec<Ident>,
+        pars: Vec<(Ident, Type)>,
+        res: Type,
         body: Box<Expr>,
         span: Span,
     },

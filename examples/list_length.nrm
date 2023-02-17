@@ -5,7 +5,7 @@ letrec
     | Cons(T,List[T])
     | Nil
     end
-    fun length(lst) =>
+    fun length[T](lst: List[T]): Int =
         case lst of
         | Cons(head,tail) =>
             @iadd(length(tail),1)

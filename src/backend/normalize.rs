@@ -343,7 +343,7 @@ impl Normalize {
                             name, pars, body, ..
                         } => Some(MDecl {
                             func: *name,
-                            pars: pars.clone(),
+                            pars: pars.iter().map(|(par, _)| *par).collect(),
                             body: self.normalize_top(body),
                         }),
                         Decl::Data {
@@ -808,13 +808,13 @@ letrec
     | Cons(T,List[T])
     | Nil
     end
-    fun length(lst) =>
+    fun length[T](lst: List[T]): Int =
         case lst of
         | Cons(head,tail) => @iadd(1, length(tail))
         | Nil => 0
         end
 in
-    length(1)
+    length(Cons(1,Cons(2,Cons(3,Cons(4,Cons(5,Nil))))))
 end
 "#;
     let mut par = Parser::new(string);
