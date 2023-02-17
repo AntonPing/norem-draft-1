@@ -13,6 +13,7 @@ pub enum TopError {
     ParseError(crate::frontend::parser::ParseError),
     RenameError(Vec<crate::frontend::renamer::RenameError>),
     IOError(std::io::Error),
+    LinkError,
 }
 
 impl Display for TopError {
@@ -23,7 +24,7 @@ impl Display for TopError {
                 write!(f, "Cause: {err:?}")?;
             }
             TopError::RenameError(errs) => {
-                write!(f, "Error: an error occured during parser phase")?;
+                write!(f, "Error: an error occured during rename phase")?;
                 for err in errs {
                     write!(f, "Cause: {err:?}")?;
                 }
@@ -31,6 +32,9 @@ impl Display for TopError {
             TopError::IOError(err) => {
                 write!(f, "Error: an IO error occured!")?;
                 write!(f, "Cause: {err:?}")?;
+            }
+            TopError::LinkError => {
+                write!(f, "Error: an linking error occured!")?;
             }
         }
         Ok(())
@@ -115,13 +119,19 @@ pub fn run_link(code: &PathBuf, library: &PathBuf, output: &PathBuf) -> Result<(
 Please make sure a C compiler is installed and 'cc' command is avaliable."
         );
     }
-    process::Command::new("cc")
+    let out = process::Command::new("cc")
         .arg(&code)
         .arg(&library)
         .arg("-o")
         .arg(output)
         .output()?;
-    Ok(())
+
+    if out.status.success() {
+        Ok(())
+    } else {
+        std::io::stdout().write(&out.stderr).unwrap();
+        Err(TopError::LinkError)
+    }
 }
 
 pub fn run_compile_link(

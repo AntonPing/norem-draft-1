@@ -1,10 +1,16 @@
 letrec
     extern print_int : fun(Int) -> ();
     extern scan_int : fun() -> Int;
+    extern env_int : fun(Int) -> Int;
+    extern prog_exit: fun(Int) -> ();
     data List[T] =
     | Cons(T,List[T])
     | Nil
     end
+    fun make_int_list(n: Int): List[Int] =
+        if @icmpeq(n,0)
+        then Nil
+        else Cons(n,make_int_list(@isub(n,1)))
     fun length[T](lst: List[T]): Int =
         case lst of
         | Cons(head,tail) =>
@@ -12,6 +18,7 @@ letrec
         | Nil => 0
         end
 in
-    let l = length(Cons(1,Cons(2,Cons(3,Cons(4,Cons(5,Nil))))));
-    #print_int(l)
+    let n = #env_int(1);
+    let lst = make_int_list();
+    #print_int(length(lst));
 end

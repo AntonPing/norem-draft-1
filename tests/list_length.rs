@@ -7,13 +7,16 @@ use norem::utils::driver;
 #[test]
 fn test_list_length() {
     let input = PathBuf::from("examples/list_length.nrm");
-    let library = PathBuf::from("examples/list_length.c");
+    let library = PathBuf::from("examples/test_lib.c");
     let temp = PathBuf::from("target/examples/list_length.temp.c");
     let output = PathBuf::from("target/examples/list_length.out");
     driver::run_compile(&input, &temp, false).unwrap();
     driver::run_link(&temp, &library, &output).unwrap();
     let res = process::Command::new("target/examples/list_length.out")
+        .arg("42")
         .output()
         .unwrap();
-    assert_eq!(res.stdout, Vec::from("5\n"));
+    assert!(res.status.success());
+    // println!("{}", String::from_utf8_lossy(&res.stdout));
+    assert_eq!(res.stdout, Vec::from("42\n"));
 }
