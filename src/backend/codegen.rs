@@ -26,28 +26,30 @@ impl Codegen {
     }
 
     fn visit_toplevel(&mut self, expr: &MExpr) -> Result {
-        match expr {
-            MExpr::LetIn { decls, cont } => {
-                self.text.push_str(C_PROLOGUE);
-                self.visit_extern_header()?;
-                for decl in decls {
-                    self.visit_decl_header(decl)?;
-                }
-                for decl in decls {
-                    self.visit_decl(decl)?;
-                }
-                self.text.push_str("int main(int argc, char* argv[])\n{\n");
-                self.text.push_str(C_SYS_CHECK);
-                self.is_main = true;
-                self.visit_expr(cont)?;
-                self.text.push_str("}\n");
-                self.text.push_str(C_EPILOGUE);
-                Ok(())
-            }
-            _ => {
-                panic!("after closure conversion there should be one and only one toplevel!");
-            }
+        let vec = Vec::new();
+        let (decls, expr): (&Vec<MDecl>, &MExpr) = match expr {
+            MExpr::LetIn { decls, cont } => (decls, cont),
+            other => (&vec, other),
+        };
+        self.text.push_str(C_PROLOGUE);
+        self.visit_extern_header()?;
+        for decl in decls {
+            self.visit_decl_header(decl)?;
         }
+        for decl in decls {
+            self.visit_decl(decl)?;
+        }
+        self.text.push_str("int TOP_ARGC;\n");
+        self.text.push_str("char** TOP_ARGV;\n");
+        self.text.push_str("int main(int argc, char* argv[])\n{\n");
+        self.text.push_str("TOP_ARGC = argc;\n");
+        self.text.push_str("TOP_ARGV = argv;\n");
+        self.text.push_str(C_SYS_CHECK);
+        self.is_main = true;
+        self.visit_expr(expr)?;
+        self.text.push_str("}\n");
+        self.text.push_str(C_EPILOGUE);
+        Ok(())
     }
 
     fn visit_expr(&mut self, expr: &MExpr) -> Result {
@@ -173,6 +175,7 @@ impl Codegen {
                 cont,
             } => {
                 self.bind_vec.push(*bind);
+                write!(self.text, "void* {bind};\n")?;
                 write!(self.text, "if({arg1})\n{{\n")?;
                 self.visit_expr(brch1)?;
                 write!(self.text, "}}\nelse\n{{\n")?;
@@ -233,8 +236,7 @@ impl Codegen {
     }
 }
 
-pub static C_PROLOGUE: &'static str = r#"
-#include <stdio.h>
+pub static C_PROLOGUE: &'static str = r#"#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
