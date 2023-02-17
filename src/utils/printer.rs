@@ -96,6 +96,18 @@ impl Display for Builtin {
             Builtin::BAnd => write!(f, "band"),
             Builtin::BOr => write!(f, "bor"),
             Builtin::BNot => write!(f, "bnot"),
+            Builtin::ICmpEq => write!(f, "icmpeq"),
+            Builtin::ICmpNe => write!(f, "icmpne"),
+            Builtin::ICmpGr => write!(f, "icmpgr"),
+            Builtin::ICmpGe => write!(f, "icmpge"),
+            Builtin::ICmpLs => write!(f, "icmpls"),
+            Builtin::ICmpLe => write!(f, "icmple"),
+            Builtin::RCmpEq => write!(f, "rcmpeq"),
+            Builtin::RCmpNe => write!(f, "rcmpne"),
+            Builtin::RCmpGr => write!(f, "rcmpgr"),
+            Builtin::RCmpGe => write!(f, "rcmpge"),
+            Builtin::RCmpLs => write!(f, "rcmpls"),
+            Builtin::RCmpLe => write!(f, "rcmple"),
         }
     }
 }
@@ -364,6 +376,12 @@ impl Display for BinOpPrim {
             BinOpPrim::IAdd => write!(f, "iadd"),
             BinOpPrim::ISub => write!(f, "isub"),
             BinOpPrim::IMul => write!(f, "imul"),
+            BinOpPrim::ICmpEq => write!(f, "icmpeq"),
+            BinOpPrim::ICmpNe => write!(f, "icmpne"),
+            BinOpPrim::ICmpGr => write!(f, "icmpgr"),
+            BinOpPrim::ICmpGe => write!(f, "icmpge"),
+            BinOpPrim::ICmpLs => write!(f, "icmpls"),
+            BinOpPrim::ICmpLe => write!(f, "icmple"),
         }
     }
 }

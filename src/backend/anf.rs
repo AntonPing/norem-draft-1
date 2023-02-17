@@ -68,6 +68,12 @@ pub enum BinOpPrim {
     IAdd,
     ISub,
     IMul,
+    ICmpEq,
+    ICmpNe,
+    ICmpGr,
+    ICmpGe,
+    ICmpLs,
+    ICmpLe,
 }
 
 #[derive(Clone, Debug)]

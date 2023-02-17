@@ -65,21 +65,22 @@ impl<P> TypeBase<P> {
             Box::new(TypeBase::Lit(lit)),
         )
     }
+    fn compare(lit: LitType) -> Self {
+        TypeBase::Fun(
+            vec![TypeBase::Lit(lit), TypeBase::Lit(lit)],
+            Box::new(TypeBase::Lit(LitType::Bool)),
+        )
+    }
     fn get_builtin_type(prim: Builtin) -> Self {
+        use Builtin::*;
         match prim {
-            Builtin::IAdd => TypeBase::binop(LitType::Int),
-            Builtin::ISub => TypeBase::binop(LitType::Int),
-            Builtin::IMul => TypeBase::binop(LitType::Int),
-            Builtin::IDiv => TypeBase::binop(LitType::Int),
-            Builtin::IRem => TypeBase::binop(LitType::Int),
-            Builtin::INeg => TypeBase::uniop(LitType::Int),
-            Builtin::RAdd => TypeBase::binop(LitType::Real),
-            Builtin::RSub => TypeBase::binop(LitType::Real),
-            Builtin::RMul => TypeBase::binop(LitType::Real),
-            Builtin::RDiv => TypeBase::binop(LitType::Real),
-            Builtin::BAnd => TypeBase::binop(LitType::Bool),
-            Builtin::BOr => TypeBase::binop(LitType::Bool),
-            Builtin::BNot => TypeBase::uniop(LitType::Bool),
+            IAdd | ISub | IMul | IDiv | IRem => TypeBase::binop(LitType::Int),
+            INeg => TypeBase::uniop(LitType::Int),
+            RAdd | RSub | RMul | RDiv => TypeBase::binop(LitType::Real),
+            BAnd | BOr => TypeBase::binop(LitType::Bool),
+            BNot => TypeBase::uniop(LitType::Bool),
+            ICmpGr | ICmpLs | ICmpEq | ICmpLe | ICmpGe | ICmpNe => TypeBase::compare(LitType::Int),
+            RCmpGr | RCmpLs | RCmpEq | RCmpLe | RCmpGe | RCmpNe => TypeBase::compare(LitType::Real),
         }
     }
 }

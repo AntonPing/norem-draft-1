@@ -36,24 +36,26 @@ pub enum Builtin {
     BAnd,
     BOr,
     BNot,
+    ICmpEq,
+    ICmpNe,
+    ICmpGr,
+    ICmpGe,
+    ICmpLs,
+    ICmpLe,
+    RCmpEq,
+    RCmpNe,
+    RCmpGr,
+    RCmpGe,
+    RCmpLs,
+    RCmpLe,
 }
 
 impl Builtin {
     pub fn get_arity(&self) -> usize {
         match self {
-            Builtin::IAdd => 2,
-            Builtin::ISub => 2,
-            Builtin::IMul => 2,
-            Builtin::IDiv => 2,
             Builtin::INeg => 1,
-            Builtin::IRem => 2,
-            Builtin::RAdd => 2,
-            Builtin::RSub => 2,
-            Builtin::RMul => 2,
-            Builtin::RDiv => 2,
-            Builtin::BAnd => 2,
-            Builtin::BOr => 2,
             Builtin::BNot => 1,
+            _ => 2,
         }
     }
 }

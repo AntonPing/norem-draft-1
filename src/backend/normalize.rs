@@ -94,6 +94,18 @@ impl Normalize {
                     Builtin::BAnd => todo!(),
                     Builtin::BOr => todo!(),
                     Builtin::BNot => todo!(),
+                    Builtin::ICmpGr => OpPrim::Binary(BinOpPrim::ICmpGr),
+                    Builtin::ICmpLs => OpPrim::Binary(BinOpPrim::ICmpLs),
+                    Builtin::ICmpEq => OpPrim::Binary(BinOpPrim::ICmpEq),
+                    Builtin::ICmpLe => OpPrim::Binary(BinOpPrim::ICmpLe),
+                    Builtin::ICmpGe => OpPrim::Binary(BinOpPrim::ICmpGe),
+                    Builtin::ICmpNe => OpPrim::Binary(BinOpPrim::ICmpNe),
+                    Builtin::RCmpGr => todo!(),
+                    Builtin::RCmpLs => todo!(),
+                    Builtin::RCmpEq => todo!(),
+                    Builtin::RCmpLe => todo!(),
+                    Builtin::RCmpGe => todo!(),
+                    Builtin::RCmpNe => todo!(),
                 };
 
                 let stmt = match prim {

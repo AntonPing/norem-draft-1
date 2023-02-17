@@ -118,6 +118,12 @@ impl Codegen {
                     BinOpPrim::IAdd => ("int64_t", "+", "int64_t"),
                     BinOpPrim::ISub => ("int64_t", "-", "int64_t"),
                     BinOpPrim::IMul => ("int64_t", "*", "int64_t"),
+                    BinOpPrim::ICmpGr => ("int64_t", ">", "int64_t"),
+                    BinOpPrim::ICmpLs => ("int64_t", "<", "int64_t"),
+                    BinOpPrim::ICmpEq => ("int64_t", "==", "int64_t"),
+                    BinOpPrim::ICmpLe => ("int64_t", "<=", "int64_t"),
+                    BinOpPrim::ICmpGe => ("int64_t", ">=", "int64_t"),
+                    BinOpPrim::ICmpNe => ("int64_t", "!=", "int64_t"),
                 };
                 write!(
                     self.text,
