@@ -202,7 +202,7 @@ impl Display for Stmt {
                 bind, typ, expr, ..
             } => {
                 if let Some(typ) = typ {
-                    write!(f, "let {bind} : {typ} = {expr};")
+                    write!(f, "let {bind}: {typ} = {expr};")
                 } else {
                     write!(f, "let {bind} = {expr};")
                 }
@@ -299,7 +299,6 @@ impl Display for Decl {
                     let pars = pars.iter().format(&", ");
                     write!(f, "data {name}[{pars}] =")?;
                 }
-                // Void can't be defined by user
                 assert!(!vars.is_empty());
                 for var in vars {
                     write!(f, "{NWLN}| {var}")?;
@@ -317,10 +316,17 @@ impl Display for Decl {
                 }
             }
             Decl::Extern {
-                name, pars, typ, ..
+                name,
+                gens: pars,
+                typ,
+                ..
             } => {
-                let pars = pars.iter().format(&", ");
-                write!(f, "extern {name}({pars}): {typ};")
+                let pars = if pars.is_empty() {
+                    "".to_string()
+                } else {
+                    format!("[{}]", pars.iter().format(&", "))
+                };
+                write!(f, "extern {name}{pars}: {typ};")
             }
         }
     }
@@ -337,7 +343,7 @@ impl Display for Type {
             }
             Type::Fun { pars, res, .. } => {
                 let pars = pars.iter().format(&", ");
-                write!(f, "fn ({pars}) -> {res}")
+                write!(f, "fn({pars}) -> {res}")
             }
             Type::App { cons, args, .. } => {
                 assert!(!args.is_empty());

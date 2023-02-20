@@ -145,7 +145,6 @@ impl Renamer {
                 self.enter_scope();
                 let mut name_set: HashSet<Ident> = HashSet::new();
                 for decl in decls.iter_mut() {
-                    assert!(decl.get_name().is_dummy());
                     match decl {
                         Decl::Func { name, .. } => {
                             if name_set.contains(name) {
@@ -285,7 +284,10 @@ impl Renamer {
                 self.leave_scope();
             }
             Decl::Extern {
-                name: _, pars, typ, ..
+                name: _,
+                gens: pars,
+                typ,
+                ..
             } => {
                 self.enter_scope();
                 pars.iter_mut().for_each(|par| self.intro_typ_var(par));
@@ -334,7 +336,8 @@ fn renamer_test() {
     use super::parser::*;
     let string = r#"
 letrec
-    extern print_int : fun(Int) -> ();
+    extern print_int: fun(Int) -> ();
+    extern prg_exit[T]: fun(Int) -> T;
     type My-Int = Int;
     type Option-Int = Option[Int];
     data Option[T] =

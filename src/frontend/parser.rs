@@ -661,12 +661,12 @@ pub fn parse_decl(p: &mut Parser) -> ParseResult<Decl> {
         TokenKind::Extern => {
             p.match_token(TokenKind::Extern).unwrap();
             let name = p.match_lower_ident()?.name;
-            let pars = p
+            let gens = p
                 .option(|p| {
                     p.match_token(TokenKind::LBracket)?;
-                    let pars = p.sepby1(TokenKind::Comma, |p| p.match_upper_ident())?;
+                    let gens = p.sepby1(TokenKind::Comma, |p| p.match_upper_ident())?;
                     p.match_token(TokenKind::RBracket)?;
-                    Ok(pars)
+                    Ok(gens)
                 })?
                 .unwrap_or(Vec::new());
             p.match_token(TokenKind::Colon)?;
@@ -675,7 +675,7 @@ pub fn parse_decl(p: &mut Parser) -> ParseResult<Decl> {
             let span = Span::new(start, p.end_pos());
             Ok(Decl::Extern {
                 name,
-                pars,
+                gens,
                 typ,
                 span,
             })
@@ -760,7 +760,8 @@ fn parse_type(p: &mut Parser) -> ParseResult<Type> {
 fn parser_test() {
     let string = r#"
 letrec
-    extern print_int : fun(Int) -> ();
+    extern print_int: fun(Int) -> ();
+    extern prg_exit[T]: fun(Int) -> T;
     type My-Int = Int;
     type Option-Int = Option[Int];
     data Option[T] =

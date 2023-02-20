@@ -1,13 +1,12 @@
 letrec
-    extern print_int : fun(Int) -> ();
-    extern scan_int : fun() -> Int;
-    extern env_int : fun(Int) -> Int;
-    extern prog_exit: fun(Int) -> ();
+    extern print_int: fun(Int) -> ();
+    extern scan_int: fun() -> Int;
+    extern env_int: fun(Int) -> Int;
+    extern prog_exit[T]: fun(Int) -> T;
     fun fib(n: Int): Int =
-        if @icmpls(n,0) then begin
-            #prog_exit(1);
-            0
-        end else if @icmpeq(n,0) then
+        if @icmpls(n,0) then
+            #prog_exit(1)
+        else if @icmpeq(n,0) then
             0
         else if @icmpeq(n,1) then
             1

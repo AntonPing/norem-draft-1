@@ -296,7 +296,7 @@ pub enum Decl {
     },
     Extern {
         name: InternStr,
-        pars: Vec<Ident>,
+        gens: Vec<Ident>,
         typ: Type,
         span: Span,
     },
