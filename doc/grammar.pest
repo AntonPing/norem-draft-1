@@ -1,0 +1,57 @@
+WHITESPACE = _{ " " | "\t" | "\n" }
+toplevel = { SOI ~ expr ~ EOI }
+alpha = @{ 'a'..'z' | 'A'..'Z' }
+digit = @{ '0'..'9' }
+int = @{ "-"? ~ digit+ }
+real = @{ int ~ ("." ~ digit+)? ~ (^"e" ~ int)? }
+bool = @{ "true" | "false" }
+// char = todo!
+// string = todo!
+lit_val = @{ int | real | bool } // char | string  }
+lit_type = @{ "Int" | "Real" | "Bool" | "Char" | "()" }
+ident_head = @{ alpha }
+ident_body = @{ alpha | digit | "_" | "-" }
+ident = @{ ident_head ~ ident_body* }
+ident_list = { ident ~ ("," ~ ident)* }
+expr = { expr_no_app ~ ("(" ~ expr_list? ~ ")")* }
+expr_no_app =
+    { "@" ~ ident ~ "(" ~ expr_list? ~ ")"
+    | "#" ~ ident ~ "(" ~ expr_list? ~ ")"
+    | "fun" ~ "(" ~ ident_list ~ ")" ~ "=>" ~ expr
+    | "case" ~ expr ~ "of" ~ rule+ ~ "end"
+    | "if" ~ expr ~ "then" ~ expr ~ "else" ~ expr
+    | "(" ~ expr ~ ")"
+    | "begin" ~ block ~ "end"
+    | "letrec" ~ decl* ~ "in" ~ block ~ "end"
+    | lit_val
+    | ident
+    }
+expr_list = { expr ~ ("," ~ expr)* }
+block = { stmt* ~ expr? }
+stmt =
+    { "let" ~ ident ~ (":" ~ type)? ~ "=" ~ expr ~ ";"
+    | expr ~ ";"
+    }
+rule = { "|" ~ patn ~ "=>" ~ expr }
+patn =
+    { lit_val
+    | "_"
+    | ident ~ ("(" ~  patn_list ~ ")")?
+    }
+patn_list = { patn ~ ("," ~ patn)* }
+decl =
+    { "fun" ~ ident ~ ("[" ~ ident_list ~ "]")? ~
+    	"(" ~ ident_type_pair_list? ~ ")" ~ (":" ~ type)? ~ "=" ~ block
+    | "data" ~ ident ~ ("[" ~ ident_list ~ "]")? ~ "=" ~ varient+ ~ "end"
+    | "type" ~ ident ~ ("[" ~ ident_list ~ "]")? ~ "=" ~ type ~ ";"
+    | "extern" ~ ident ~ ("[" ~ ident_list ~ "]")? ~ ":" ~ type ~ ";"
+    }
+ident_type_pair = { ident ~ ":" ~ type }
+ident_type_pair_list ={  ident_type_pair ~ ("," ~ ident_type_pair)* }
+varient = { "|" ~ ident ~ ("(" ~ type_list ~ ")")? }
+type =
+    { lit_type
+    | "fun" ~ "(" ~ type_list? ~ ")" ~ "->" ~ type
+    | ident ~ ("[" ~ type_list ~ "]")?
+    }
+type_list = { type ~ ("," ~ type)* }
