@@ -17,7 +17,7 @@ expr = { expr_no_app ~ ("(" ~ expr_list? ~ ")")* }
 expr_no_app =
     { "@" ~ ident ~ "(" ~ expr_list? ~ ")"
     | "#" ~ ident ~ "(" ~ expr_list? ~ ")"
-    | "fun" ~ "(" ~ ident_list ~ ")" ~ "=>" ~ expr
+    | "fn" ~ "(" ~ ident_list ~ ")" ~ "=>" ~ expr
     | "case" ~ expr ~ "of" ~ rule+ ~ "end"
     | "if" ~ expr ~ "then" ~ expr ~ "else" ~ expr
     | "(" ~ expr ~ ")"
@@ -40,7 +40,7 @@ patn =
     }
 patn_list = { patn ~ ("," ~ patn)* }
 decl =
-    { "fun" ~ ident ~ ("[" ~ ident_list ~ "]")? ~
+    { "func" ~ ident ~ ("[" ~ ident_list ~ "]")? ~
     	"(" ~ ident_type_pair_list? ~ ")" ~ (":" ~ type)? ~ "=" ~ block
     | "data" ~ ident ~ ("[" ~ ident_list ~ "]")? ~ "=" ~ varient+ ~ "end"
     | "type" ~ ident ~ ("[" ~ ident_list ~ "]")? ~ "=" ~ type ~ ";"
@@ -51,7 +51,7 @@ ident_type_pair_list ={  ident_type_pair ~ ("," ~ ident_type_pair)* }
 varient = { "|" ~ ident ~ ("(" ~ type_list ~ ")")? }
 type =
     { lit_type
-    | "fun" ~ "(" ~ type_list? ~ ")" ~ "->" ~ type
+    | "fn" ~ "(" ~ type_list? ~ ")" ~ "->" ~ type
     | ident ~ ("[" ~ type_list ~ "]")?
     }
 type_list = { type ~ ("," ~ type)* }

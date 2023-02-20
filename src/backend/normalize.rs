@@ -804,7 +804,7 @@ fn normalize_test() {
 
     let string = r#"
     begin
-        let f = fun(x) => @iadd(x,1);
+        let f = fn(x) => @iadd(x,1);
         f(42)
     end
     "#;
@@ -846,7 +846,7 @@ letrec
     | Cons(T,List[T])
     | Nil
     end
-    fun length[T](lst: List[T]): Int =
+    func length[T](lst: List[T]): Int =
         case lst of
         | Cons(head,tail) => @iadd(1, length(tail))
         | Nil => 0

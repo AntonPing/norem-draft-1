@@ -127,7 +127,7 @@ impl Display for Expr {
             }
             Expr::Fun { pars, body, .. } => {
                 let pars = pars.iter().format(&", ");
-                write!(f, "fn ({pars}) {{{INDT}{NWLN}{body}{DEDT}{NWLN}}}")
+                write!(f, "fn({pars}) => {body}")
             }
             Expr::App { func, args, .. } => {
                 let args = args.iter().format(&", ");
@@ -288,7 +288,7 @@ impl Display for Decl {
                 } else {
                     format!(": {res}")
                 };
-                write!(f, "fun {name}{gens}({pars}){res} = {body}")
+                write!(f, "func {name}{gens}({pars}){res} = {body}")
             }
             Decl::Data {
                 name, pars, vars, ..
@@ -502,7 +502,7 @@ impl Display for MDecl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let MDecl { func, pars, body } = self;
         let pars = pars.iter().format(&", ");
-        write!(f, "fun {func}({pars}) = {INDT}{NWLN}{body}{DEDT}")
+        write!(f, "fn {func}({pars}) = {INDT}{NWLN}{body}{DEDT}")
     }
 }
 

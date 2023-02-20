@@ -24,7 +24,7 @@ impl<'src> Parser<'src> {
         let tokens: Vec<Token> = lex.into_iter().collect();
         Parser {
             source: input,
-            tokens: tokens,
+            tokens,
             cursor: 0,
         }
     }
@@ -380,8 +380,8 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
             let span = Span::new(start, p.end_pos());
             Ok(Expr::Prim { prim, args, span })
         }
-        TokenKind::Fun => {
-            p.match_token(TokenKind::Fun).unwrap();
+        TokenKind::Fn => {
+            p.match_token(TokenKind::Fn).unwrap();
             p.match_token(TokenKind::LParen)?;
             let pars = p.sepby(TokenKind::Comma, |p| p.match_lower_ident())?;
             p.match_token(TokenKind::RParen)?;
@@ -453,7 +453,7 @@ fn parse_expr_no_app(p: &mut Parser) -> ParseResult<Expr> {
                 TokenKind::LitChar,
                 TokenKind::LowerIdent,
                 TokenKind::Builtin,
-                TokenKind::Fun,
+                TokenKind::Fn,
                 TokenKind::Let,
                 TokenKind::Case,
                 TokenKind::Begin,
@@ -571,8 +571,8 @@ fn parse_rule(p: &mut Parser) -> ParseResult<Rule> {
 pub fn parse_decl(p: &mut Parser) -> ParseResult<Decl> {
     let start = p.start_pos();
     match p.peek_first() {
-        TokenKind::Fun => {
-            p.match_token(TokenKind::Fun).unwrap();
+        TokenKind::Func => {
+            p.match_token(TokenKind::Func).unwrap();
             let name = p.match_lower_ident()?;
             let gens = p
                 .option(|p| {
@@ -681,7 +681,12 @@ pub fn parse_decl(p: &mut Parser) -> ParseResult<Decl> {
             })
         }
         _ => {
-            static VEC: &[TokenKind] = &[TokenKind::Fun, TokenKind::Data, TokenKind::Type];
+            static VEC: &[TokenKind] = &[
+                TokenKind::Func,
+                TokenKind::Data,
+                TokenKind::Type,
+                TokenKind::Extern,
+            ];
             Err(p.err_unexpected_many(VEC))
         }
     }
@@ -732,8 +737,8 @@ fn parse_type(p: &mut Parser) -> ParseResult<Type> {
                 Ok(Type::Var { var, span })
             }
         }
-        TokenKind::Fun => {
-            p.match_token(TokenKind::Fun).unwrap();
+        TokenKind::Fn => {
+            p.match_token(TokenKind::Fn).unwrap();
             p.match_token(TokenKind::LParen)?;
             let pars = p.sepby(TokenKind::Comma, parse_type)?;
             p.match_token(TokenKind::RParen)?;
@@ -749,7 +754,7 @@ fn parse_type(p: &mut Parser) -> ParseResult<Type> {
                 TokenKind::TyBool,
                 TokenKind::TyChar,
                 TokenKind::UpperIdent,
-                TokenKind::Fun,
+                TokenKind::Fn,
             ];
             Err(p.err_unexpected_many(VEC))
         }
@@ -760,25 +765,25 @@ fn parse_type(p: &mut Parser) -> ParseResult<Type> {
 fn parser_test() {
     let string = r#"
 letrec
-    extern print_int: fun(Int) -> ();
-    extern prg_exit[T]: fun(Int) -> T;
+    extern print_int: fn(Int) -> ();
+    extern prg_exit[T]: fn(Int) -> T;
     type My-Int = Int;
     type Option-Int = Option[Int];
     data Option[T] =
     | Some(T)
     | None
     end
-    fun add1(x: Int): Int = @iadd(x, 1)
-    fun add2(x: Int): Int = begin
+    func add1(x: Int): Int = @iadd(x, 1)
+    func add2(x: Int): Int = begin
         #print_int(x);
         let y: Int = @iadd(x,1);
         #print_int(y);
         @iadd(y,1)
     end
-    fun const-3[T](x: T): Int = begin
+    func const-3[T](x: T): Int = begin
         3
     end
-    fun option-add1(x: Option[Int]): Option[Int] =
+    func option-add1(x: Option[Int]): Option[Int] =
         case x of
         | Some(y) => Some(@iadd(x,1))
         | None => None

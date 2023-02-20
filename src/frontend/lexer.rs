@@ -34,8 +34,8 @@ pub enum TokenKind {
     EArrow,
     /// "#"
     Hash,
-    /// "fun"
-    Fun,
+    /// "fn"
+    Fn,
     /// "let"
     Let,
     /// "begin"
@@ -50,6 +50,8 @@ pub enum TokenKind {
     Case,
     /// "of"
     Of,
+    /// "func"
+    Func,
     /// "data"
     Data,
     /// "type"
@@ -140,7 +142,7 @@ impl Spanned for Token {
 
 pub fn as_keyword(str: &str) -> Option<TokenKind> {
     let tok = match str {
-        "fun" => TokenKind::Fun,
+        "fn" => TokenKind::Fn,
         "let" => TokenKind::Let,
         "begin" => TokenKind::Begin,
         "letrec" => TokenKind::Letrec,
@@ -151,6 +153,7 @@ pub fn as_keyword(str: &str) -> Option<TokenKind> {
         "if" => TokenKind::If,
         "then" => TokenKind::Then,
         "else" => TokenKind::Else,
+        "func" => TokenKind::Func,
         "data" => TokenKind::Data,
         "type" => TokenKind::Type,
         "extern" => TokenKind::Extern,

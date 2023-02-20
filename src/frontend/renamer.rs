@@ -336,25 +336,25 @@ fn renamer_test() {
     use super::parser::*;
     let string = r#"
 letrec
-    extern print_int: fun(Int) -> ();
-    extern prg_exit[T]: fun(Int) -> T;
+    extern print_int: fn(Int) -> ();
+    extern prg_exit[T]: fn(Int) -> T;
     type My-Int = Int;
     type Option-Int = Option[Int];
     data Option[T] =
     | Some(T)
     | None
     end
-    fun add1(x: Int): Int = @iadd(x, 1)
-    fun add2(x: Int): Int = begin
+    func add1(x: Int): Int = @iadd(x, 1)
+    func add2(x: Int): Int = begin
         #print_int(x);
         let y: Int = @iadd(x,1);
         #print_int(zzzzz);
         @iadd(y,1)
     end
-    fun const-3[T](x: T): Int = begin
+    func const-3[T](x: T): Int = begin
         3
     end
-    fun option-add1(x: Option[Int]): Option[Int] =
+    func option-add1(x: Option[Int]): Option[Int] =
         case x of
         | Some(y) => Some(@iadd(x,1))
         | None => None
