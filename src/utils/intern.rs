@@ -12,11 +12,10 @@ struct Interner {
 
 impl Interner {
     fn new() -> Interner {
-        let map = ('a'..='z')
-            .enumerate()
-            .map(|(i, s)| (s.to_string(), i))
+        let map = (0u8..=255u8)
+            .map(|i| (char::from(i).to_string(), i as usize))
             .collect();
-        let vec = ('a'..='z').map(|ch| ch.to_string()).collect();
+        let vec = (0u8..=255u8).map(|i| char::from(i).to_string()).collect();
         Interner {
             str_to_idx: map,
             idx_to_str: vec,
@@ -114,9 +113,8 @@ impl Ident {
     // a fast single-character variable generator
     // no need to lookup interner
     pub fn generate(ch: char) -> Ident {
-        assert!(ch.is_ascii_alphabetic() && ch.is_ascii_lowercase());
-        let n = ch as u8 - 'a' as u8;
-        let ident = InternStr(n as usize);
+        assert!(ch.is_ascii());
+        let ident = InternStr(ch as usize);
         Ident {
             name: ident,
             index: 0,
