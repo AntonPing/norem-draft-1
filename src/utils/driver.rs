@@ -12,6 +12,7 @@ use crate::frontend;
 pub enum TopError {
     ParseError(crate::frontend::parser::ParseError),
     RenameError(Vec<crate::frontend::renamer::RenameError>),
+    InferError(Vec<crate::frontend::infer::InferError>),
     IOError(std::io::Error),
     LinkError,
 }
@@ -25,6 +26,12 @@ impl Display for TopError {
             }
             TopError::RenameError(errs) => {
                 write!(f, "Error: an error occured during rename phase")?;
+                for err in errs {
+                    write!(f, "Cause: {err:?}")?;
+                }
+            }
+            TopError::InferError(errs) => {
+                write!(f, "Error: an error occured during type-check phase")?;
                 for err in errs {
                     write!(f, "Cause: {err:?}")?;
                 }
@@ -55,6 +62,12 @@ impl From<Vec<frontend::renamer::RenameError>> for TopError {
     }
 }
 
+impl From<Vec<frontend::infer::InferError>> for TopError {
+    fn from(value: Vec<frontend::infer::InferError>) -> Self {
+        TopError::InferError(value)
+    }
+}
+
 impl From<std::io::Error> for TopError {
     fn from(value: std::io::Error) -> Self {
         TopError::IOError(value)
@@ -65,6 +78,8 @@ pub fn compile_source(source: String, dump: bool) -> Result<String, TopError> {
     let mut par = frontend::parser::Parser::new(&source);
     let mut expr = frontend::parser::parse_expr(&mut par)?;
     frontend::renamer::Renamer::run(&mut expr)?;
+    frontend::infer::Infer::run(&expr)?;
+
     let expr = backend::normalize::Normalize::run(&expr);
     if dump {
         println!("normalize:\n{expr}");

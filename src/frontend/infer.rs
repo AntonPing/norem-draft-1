@@ -1,102 +1,29 @@
 use itertools::Itertools;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::convert::Infallible;
-use std::fmt::Display;
-use std::ops::{Deref, DerefMut};
-use std::rc::Rc;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
 
 use super::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TypeCell {
-    Unbound(Ident, usize),
-    Link(MonoType),
-}
-
-impl TypeCell {
-    fn is_bound(&self) -> bool {
-        match self {
-            TypeCell::Unbound(_, _) => false,
-            TypeCell::Link(_) => true,
-        }
-    }
-    fn unwrap_link(&self) -> &MonoType {
-        match self {
-            TypeCell::Unbound(_, _) => panic!("failed to unwrap link!"),
-            TypeCell::Link(link) => link,
-        }
-    }
-    #[allow(dead_code)]
-    fn unwrap_link_mut(&mut self) -> &mut MonoType {
-        match self {
-            TypeCell::Unbound(_, _) => panic!("failed to unwrap link!"),
-            TypeCell::Link(link) => link,
-        }
-    }
-    fn unwrap_level(&self) -> usize {
-        match self {
-            TypeCell::Unbound(_, level) => *level,
-            TypeCell::Link(_) => panic!("failed to unwrap link!"),
-        }
-    }
-}
-type MonoType = TypeBase<Infallible>;
-type PolyType = TypeBase<()>;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TypeBase<P> {
+pub enum TypeBase {
     Lit(LitType),
-    // Var can only appears in PolyType
-    Var(Ident, P),
-    // mutable cell for constant-time unification
-    Cell(Rc<RefCell<TypeCell>>),
-    Fun(Vec<TypeBase<P>>, Box<TypeBase<P>>),
-    App(Ident, Vec<TypeBase<P>>),
+    Gen(Ident),
+    Var(Ident),
+    Fun(Vec<TypeBase>, Box<TypeBase>),
+    App(Ident, Vec<TypeBase>),
 }
 
-impl<P> TypeBase<P> {
-    fn uniop(lit: LitType) -> Self {
-        TypeBase::Fun(vec![TypeBase::Lit(lit)], Box::new(TypeBase::Lit(lit)))
-    }
-    fn binop(lit: LitType) -> Self {
-        TypeBase::Fun(
-            vec![TypeBase::Lit(lit), TypeBase::Lit(lit)],
-            Box::new(TypeBase::Lit(lit)),
-        )
-    }
-    fn compare(lit: LitType) -> Self {
-        TypeBase::Fun(
-            vec![TypeBase::Lit(lit), TypeBase::Lit(lit)],
-            Box::new(TypeBase::Lit(LitType::Bool)),
-        )
-    }
-    fn get_builtin_type(prim: Builtin) -> Self {
-        use Builtin::*;
-        match prim {
-            IAdd | ISub | IMul | IDiv | IRem => TypeBase::binop(LitType::Int),
-            INeg => TypeBase::uniop(LitType::Int),
-            RAdd | RSub | RMul | RDiv => TypeBase::binop(LitType::Real),
-            BAnd | BOr => TypeBase::binop(LitType::Bool),
-            BNot => TypeBase::uniop(LitType::Bool),
-            ICmpGr | ICmpLs | ICmpEq | ICmpLe | ICmpGe | ICmpNe => TypeBase::compare(LitType::Int),
-            RCmpGr | RCmpLs | RCmpEq | RCmpLe | RCmpGe | RCmpNe => TypeBase::compare(LitType::Real),
-        }
-    }
-}
-
-impl<P> Display for TypeBase<P> {
+impl fmt::Display for TypeBase {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             TypeBase::Lit(lit) => write!(f, "{lit}"),
-            TypeBase::Var(var, _) => write!(f, "{var}"),
-            TypeBase::Cell(cell) => match cell.borrow().deref() {
-                TypeCell::Unbound(name, _) => write!(f, "{name}"),
-                TypeCell::Link(link) => write!(f, "{link}"),
-            },
+            TypeBase::Gen(var) => write!(f, "{}", var.name),
+            TypeBase::Var(var) => write!(f, "{var}"),
             TypeBase::Fun(pars, res) => {
                 let pars = pars.iter().format(&", ");
-                write!(f, "fun({pars}) -> {res}")
+                write!(f, "fn({pars}) -> {res}")
             }
             TypeBase::App(cons, args) => {
                 let args = args.iter().format(&", ");
@@ -106,48 +33,164 @@ impl<P> Display for TypeBase<P> {
     }
 }
 
-impl From<MonoType> for PolyType {
-    // todo: maybe use unsafe cast?
-    fn from(mty: MonoType) -> Self {
-        match mty {
-            TypeBase::Lit(lit) => TypeBase::Lit(lit),
-            TypeBase::Var(_, _) => unreachable!(),
-            TypeBase::Cell(cell) => TypeBase::Cell(cell),
-            TypeBase::Fun(pars, res) => TypeBase::Fun(
-                pars.into_iter().map(|par| par.into()).collect(),
-                Box::new((*res).into()),
-            ),
-            TypeBase::App(cons, args) => {
-                TypeBase::App(cons, args.into_iter().map(|arg| arg.into()).collect())
+impl TypeBase {
+    fn new_type() -> TypeBase {
+        TypeBase::Var(Ident::generate('t'))
+    }
+    fn rename_type(ident: &Ident) -> TypeBase {
+        TypeBase::Var(ident.uniquify())
+    }
+    fn subst(&self, map: &HashMap<Ident, TypeBase>) -> TypeBase {
+        match self {
+            TypeBase::Lit(lit) => TypeBase::Lit(*lit),
+            TypeBase::Gen(gen) => {
+                if let Some(typ) = map.get(&gen) {
+                    typ.clone()
+                } else {
+                    TypeBase::Gen(*gen)
+                }
             }
+            TypeBase::Var(var) => {
+                if let Some(typ) = map.get(&var) {
+                    typ.clone()
+                } else {
+                    TypeBase::Var(*var)
+                }
+            }
+            TypeBase::Fun(pars, res) => {
+                let pars = pars.iter().map(|par| par.subst(map)).collect();
+                let res = Box::new(res.subst(map));
+                TypeBase::Fun(pars, res)
+            }
+            TypeBase::App(cons, args) => {
+                let args = args.iter().map(|arg| arg.subst(map)).collect();
+                TypeBase::App(*cons, args)
+            }
+        }
+    }
+    fn is_free(&self, var: &Ident) -> bool {
+        match self {
+            TypeBase::Lit(_) | TypeBase::Gen(_) => false,
+            TypeBase::Var(var2) => *var == *var2,
+            TypeBase::Fun(pars, res) => pars.iter().any(|par| par.is_free(var)) || res.is_free(var),
+            TypeBase::App(cons, args) => (*cons == *var) || args.iter().any(|arg| arg.is_free(var)),
         }
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
-pub enum InferError {
-    VarNotInScope,
-    CantUnifyLiteralTypes,
-    CantUnifyDiffArgLens,
-    CantUnifyConstructor,
-    CantUnify,
-    OccurCheckFailed,
+impl Builtin {
+    fn get_pars_type(&self) -> Vec<TypeBase> {
+        use Builtin::*;
+        match self {
+            IAdd | ISub | IMul | IDiv | IRem | ICmpGr | ICmpLs | ICmpEq | ICmpLe | ICmpGe
+            | ICmpNe => {
+                vec![TypeBase::Lit(LitType::Int), TypeBase::Lit(LitType::Int)]
+            }
+            INeg => {
+                vec![TypeBase::Lit(LitType::Int)]
+            }
+            RAdd | RSub | RMul | RDiv | RCmpGr | RCmpLs | RCmpEq | RCmpLe | RCmpGe | RCmpNe => {
+                vec![TypeBase::Lit(LitType::Real), TypeBase::Lit(LitType::Real)]
+            }
+            BAnd | BOr => {
+                vec![TypeBase::Lit(LitType::Bool), TypeBase::Lit(LitType::Bool)]
+            }
+            BNot => {
+                vec![TypeBase::Lit(LitType::Bool)]
+            }
+        }
+    }
+    fn get_res_type(&self) -> TypeBase {
+        use Builtin::*;
+        match self {
+            IAdd | ISub | IMul | IDiv | IRem | INeg => TypeBase::Lit(LitType::Int),
+            RAdd | RSub | RMul | RDiv => TypeBase::Lit(LitType::Real),
+            BAnd | BOr | BNot | ICmpGr | ICmpLs | ICmpEq | ICmpLe | ICmpGe | ICmpNe | RCmpGr
+            | RCmpLs | RCmpEq | RCmpLe | RCmpGe | RCmpNe => TypeBase::Lit(LitType::Bool),
+        }
+    }
 }
 
-pub struct DataCons {}
-pub struct FunDecl {}
-pub struct DataDecl {}
-pub struct TypeDecl {}
+#[derive(Clone, Debug)]
+pub enum UnifyError {
+    CantUnify(TypeBase, TypeBase),
+    CantUnifyVec(Vec<TypeBase>, Vec<TypeBase>),
+    OccurCheckFailed(Ident, TypeBase),
+    DiffConstr(Ident, Ident),
+}
 
-type InferResult<T> = Result<T, InferError>;
+#[derive(Copy, Clone, Debug)]
+pub enum InferErrorTitle {
+    PrimAppError,
+    FuncAppError,
+    ExtCallError,
+    ConstructorError,
+    IfteCondError,
+    IfteBrchError,
+    CaseBrchError,
+    LetAnnoError,
+    PatternError,
+    FuncDeclError,
+}
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct InferError {
+    pub title: InferErrorTitle,
+    pub spans: Vec<(&'static str, Span)>,
+    pub errs: Vec<UnifyError>,
+}
 
 #[allow(dead_code)]
+#[derive(Clone, Debug)]
+struct FuncDecl {
+    name: Ident,
+    gens: Vec<Ident>,
+    pars: Vec<(Ident, TypeBase)>,
+    res: TypeBase,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+struct DataCons {
+    cons: Ident,
+    pars: Vec<TypeBase>,
+    // belongs to which DataDecl
+    data: Ident,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+struct DataDecl {
+    name: Ident,
+    gens: Vec<Ident>,
+    vars: Vec<Ident>,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+struct TypeDecl {
+    name: Ident,
+    gens: Vec<Ident>,
+    typ: TypeBase,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+struct ExternDecl {
+    name: InternStr,
+    gens: Vec<Ident>,
+    typ: TypeBase,
+}
+
 pub struct Infer {
-    val_env: HashMap<Ident, PolyType>,
+    val_env: HashMap<Ident, TypeBase>,
+    func_env: HashMap<Ident, FuncDecl>,
     cons_env: HashMap<Ident, DataCons>,
     data_env: HashMap<Ident, DataDecl>,
     type_env: HashMap<Ident, TypeDecl>,
-    level: usize,
+    extern_env: HashMap<InternStr, ExternDecl>,
+    generic_set: HashSet<Ident>,
+    unify_subst: HashMap<Ident, TypeBase>,
     error: Vec<InferError>,
 }
 
@@ -155,293 +198,589 @@ impl Infer {
     pub fn new() -> Infer {
         Infer {
             val_env: HashMap::new(),
+            func_env: HashMap::new(),
             cons_env: HashMap::new(),
             data_env: HashMap::new(),
             type_env: HashMap::new(),
-            level: 0,
+            extern_env: HashMap::new(),
+            generic_set: HashSet::new(),
+            unify_subst: HashMap::new(),
             error: Vec::new(),
         }
     }
-    fn new_cell(&self) -> Rc<RefCell<TypeCell>> {
-        let name = Ident::generate('t');
-        Rc::new(RefCell::new(TypeCell::Unbound(name, self.level)))
-    }
 
-    fn assign(&self, cell: &Rc<RefCell<TypeCell>>, ty: &MonoType) -> InferResult<()> {
-        if cell.borrow().is_bound() {
-            self.unify(ty, cell.borrow().unwrap_link())
-        } else {
-            self.update_level(cell, ty)?;
-            *cell.borrow_mut() = TypeCell::Link(ty.clone());
+    pub fn run(expr: &Expr) -> Result<(), Vec<InferError>> {
+        let mut pass = Infer::new();
+        pass.infer_expr(expr);
+        if pass.error.is_empty() {
             Ok(())
+        } else {
+            pass.merge_errors();
+            Err(pass.error)
         }
     }
 
-    fn update_level(&self, cell: &Rc<RefCell<TypeCell>>, ty: &MonoType) -> InferResult<()> {
-        assert!(!cell.borrow().is_bound());
+    fn merge(&self, ty: &TypeBase) -> TypeBase {
         match ty {
-            TypeBase::Lit(_lit) => Ok(()),
-            TypeBase::Var(_var, _) => unreachable!(),
-            TypeBase::Cell(cell2) => {
-                if Rc::ptr_eq(cell, cell2) {
-                    return Err(InferError::OccurCheckFailed);
-                }
-                match cell2.borrow_mut().deref_mut() {
-                    TypeCell::Unbound(_name, level2) => {
-                        let level = cell.borrow().unwrap_level();
-                        if level < *level2 {
-                            *level2 = level;
-                        }
-                        Ok(())
-                    }
-                    TypeCell::Link(link) => self.update_level(cell, link),
+            TypeBase::Lit(lit) => TypeBase::Lit(*lit),
+            TypeBase::Gen(gen) => TypeBase::Gen(*gen),
+            TypeBase::Var(var) => {
+                if let Some(res) = self.unify_subst.get(var).cloned() {
+                    self.merge(&res)
+                } else {
+                    TypeBase::Var(*var)
                 }
             }
             TypeBase::Fun(pars, res) => {
-                for par in pars {
-                    self.update_level(cell, par)?;
-                }
-                self.update_level(cell, res)
+                let pars = pars.iter().map(|par| self.merge(par)).collect();
+                let res = self.merge(res);
+                TypeBase::Fun(pars, Box::new(res))
             }
-            TypeBase::App(_cons, args) => {
-                for arg in args {
-                    self.update_level(cell, arg)?;
-                }
-                Ok(())
+            TypeBase::App(cons, args) => {
+                let args = args.iter().map(|arg| self.merge(arg)).collect();
+                TypeBase::App(*cons, args)
             }
         }
     }
 
-    fn unify(&self, ty1: &MonoType, ty2: &MonoType) -> InferResult<()> {
-        // println!("unify {:?} ~ {:?}",ty1,ty2);
-        match (&ty1, &ty2) {
-            (TypeBase::Lit(a), TypeBase::Lit(b)) => {
-                if a != b {
-                    Err(InferError::CantUnifyLiteralTypes)
+    fn unify(&mut self, lhs: &TypeBase, rhs: &TypeBase) -> Vec<UnifyError> {
+        let mut errs = Vec::new();
+        self.unify_aux(&mut errs, lhs, rhs);
+        errs
+    }
+
+    fn unify_vec(&mut self, lhs: &Vec<TypeBase>, rhs: &Vec<TypeBase>) -> Vec<UnifyError> {
+        let mut errs = Vec::new();
+        self.unify_vec_aux(&mut errs, lhs, rhs);
+        errs
+    }
+
+    fn assign(&mut self, errs: &mut Vec<UnifyError>, x: &Ident, ty: &TypeBase) {
+        assert!(!self.generic_set.contains(x));
+        if let Some(res) = self.unify_subst.get(&x).cloned() {
+            self.unify_aux(errs, ty, &res)
+        } else {
+            let ty = self.merge(ty);
+            self.unify_subst.insert(*x, ty);
+        }
+    }
+
+    fn unify_aux(&mut self, errs: &mut Vec<UnifyError>, lhs: &TypeBase, rhs: &TypeBase) {
+        let start_len = errs.len();
+        match (lhs, rhs) {
+            (TypeBase::Lit(a), TypeBase::Lit(b)) if a == b => {
+                // do nothing
+            }
+            (TypeBase::Gen(x), TypeBase::Gen(y)) if *x == *y => {
+                // do nothing
+            }
+            (TypeBase::Var(x), TypeBase::Var(y)) if *x == *y => {
+                // do nothing
+            }
+            (TypeBase::Var(x), ty) | (ty, TypeBase::Var(x)) => {
+                if ty.is_free(&x) {
+                    errs.push(UnifyError::OccurCheckFailed(*x, ty.clone()))
                 } else {
-                    Ok(())
+                    self.assign(errs, x, ty);
                 }
             }
-            (TypeBase::Var(_, _), _) | (_, TypeBase::Var(_, _)) => {
-                unreachable!()
-            }
-            (TypeBase::Cell(x), TypeBase::Cell(y)) if Rc::ptr_eq(x, y) => {
-                Ok(()) // do nothing
-            }
-            (TypeBase::Cell(cell), ty) | (ty, TypeBase::Cell(cell)) => self.assign(cell, ty),
-            (TypeBase::Fun(pars_a, res_a), TypeBase::Fun(pars_b, res_b)) => {
-                if pars_a.len() != pars_b.len() {
-                    return Err(InferError::CantUnifyDiffArgLens);
+            (TypeBase::Fun(pars1, res1), TypeBase::Fun(pars2, res2)) => {
+                self.unify_vec_aux(errs, pars1, pars2);
+                self.unify_aux(errs, res1, res2);
+                if errs.len() > start_len {
+                    errs.push(UnifyError::CantUnify(lhs.clone(), rhs.clone()))
                 }
-                for (par_a, par_b) in pars_a.iter().zip(pars_b.iter()) {
-                    self.unify(par_a, par_b)?;
-                }
-                self.unify(res_a, res_b)
             }
-            (TypeBase::App(cons_a, args_a), TypeBase::App(cons_b, args_b)) => {
-                assert_eq!(args_a.len(), args_b.len());
+            (TypeBase::App(cons1, args1), TypeBase::App(cons2, args2)) => {
                 // todo: type name alias
-                if cons_a != cons_b {
-                    return Err(InferError::CantUnifyConstructor);
+                if cons1 != cons2 {
+                    errs.push(UnifyError::DiffConstr(*cons1, *cons2))
                 }
-                for (arg_a, arg_b) in args_a.iter().zip(args_b.iter()) {
-                    self.unify(arg_a, arg_b)?;
+                self.unify_vec_aux(errs, args1, args2);
+                if errs.len() > start_len {
+                    errs.push(UnifyError::CantUnify(lhs.clone(), rhs.clone()))
                 }
-                Ok(())
             }
-            (_ty1, _ty2) => Err(InferError::CantUnify),
+            (lhs, rhs) => errs.push(UnifyError::CantUnify(lhs.clone(), rhs.clone())),
         }
     }
 
-    #[allow(dead_code)]
-    fn generalize(&self, mty: &MonoType) -> PolyType {
-        let mut map = HashMap::new();
-        self.generalize_aux(&mut map, &mty)
-    }
-
-    fn generalize_aux(&self, map: &mut HashMap<Ident, Ident>, mty: &MonoType) -> PolyType {
-        match mty {
-            TypeBase::Lit(lit) => TypeBase::Lit(*lit),
-            TypeBase::Var(_, _) => {
-                unreachable!()
+    fn unify_vec_aux(
+        &mut self,
+        errs: &mut Vec<UnifyError>,
+        lhs: &Vec<TypeBase>,
+        rhs: &Vec<TypeBase>,
+    ) {
+        if lhs.len() != rhs.len() {
+            errs.push(UnifyError::CantUnifyVec(lhs.clone(), rhs.clone()))
+        } else {
+            let start_len = errs.len();
+            for (lhs, rhs) in lhs.into_iter().zip(rhs.into_iter()) {
+                self.unify_aux(errs, lhs, rhs)
             }
-            TypeBase::Cell(cell) => {
-                match cell.borrow().deref() {
-                    TypeCell::Unbound(name, level) => {
-                        if *level > self.level {
-                            if let Some(var) = map.get(&name) {
-                                TypeBase::Var(*var, ())
-                            } else {
-                                // todo: more than 26 type parameters?!!
-                                assert!(map.len() < 26);
-                                let n = map.len() as u8 + 'a' as u8;
-                                let var = Ident::generate(n as char);
-                                map.insert(*name, var);
-                                TypeBase::Var(var, ())
-                            }
-                        } else {
-                            TypeBase::Cell(cell.clone())
-                        }
-                    }
-                    TypeCell::Link(ty) => self.generalize_aux(map, ty),
-                }
-            }
-            TypeBase::Fun(pars, res) => {
-                let pars2 = pars
-                    .iter()
-                    .map(|par| self.generalize_aux(map, par))
-                    .collect();
-                let res2 = Box::new(self.generalize_aux(map, res));
-                TypeBase::Fun(pars2, res2)
-            }
-            TypeBase::App(cons, args) => {
-                let args2 = args
-                    .iter()
-                    .map(|arg| self.generalize_aux(map, arg))
-                    .collect();
-                TypeBase::App(*cons, args2)
+            if errs.len() > start_len {
+                errs.push(UnifyError::CantUnifyVec(lhs.clone(), rhs.clone()))
             }
         }
     }
 
-    fn instantiate(&self, pty: &PolyType) -> MonoType {
-        let mut map = HashMap::new();
-        self.instantiate_aux(&mut map, pty)
-    }
-
-    fn instantiate_aux(
-        &self,
-        map: &mut HashMap<Ident, Rc<RefCell<TypeCell>>>,
-        pty: &PolyType,
-    ) -> MonoType {
-        match pty {
-            TypeBase::Lit(lit) => TypeBase::Lit(*lit),
-            TypeBase::Var(var, _) => {
-                if let Some(cell) = map.get(&var) {
-                    TypeBase::Cell(cell.clone())
-                } else {
-                    let cell = self.new_cell();
-                    map.insert(*var, cell.clone());
-                    TypeBase::Cell(cell)
-                }
-            }
-            TypeBase::Cell(cell) => {
-                let ptr = cell.borrow();
-                match ptr.deref() {
-                    TypeCell::Unbound(_, _) => TypeBase::Cell(cell.clone()),
-                    TypeCell::Link(mty) => {
-                        // todo: maybe use unsafe cast
-                        // `&mty.clone().into()` very slow, very bad!
-                        self.instantiate_aux(map, &mty.clone().into())
-                    }
-                }
-            }
-            TypeBase::Fun(pars, res) => {
-                let pars2 = pars
-                    .iter()
-                    .map(|par| self.instantiate_aux(map, par))
-                    .collect();
-                let res2 = Box::new(self.instantiate_aux(map, res));
-                TypeBase::Fun(pars2, res2)
-            }
-            TypeBase::App(cons, args) => {
-                let args2 = args
-                    .iter()
-                    .map(|arg| self.instantiate_aux(map, arg))
-                    .collect();
-                TypeBase::App(*cons, args2)
-            }
+    fn instantiate_func(&self, func: &Ident) -> TypeBase {
+        let decl = self.func_env[func].clone();
+        if decl.gens.is_empty() {
+            let pars = decl.pars.iter().map(|(_, typ)| typ.clone()).collect();
+            let res = decl.res.clone();
+            TypeBase::Fun(pars, Box::new(res))
+        } else {
+            let map: HashMap<_, _> = decl
+                .gens
+                .iter()
+                .map(|x| (*x, TypeBase::rename_type(x)))
+                .collect();
+            let pars = decl.pars.iter().map(|(_, typ)| typ.subst(&map)).collect();
+            let res = decl.res.subst(&map);
+            TypeBase::Fun(pars, Box::new(res))
         }
     }
 
-    pub fn infer_expr(&mut self, expr: &Expr) -> InferResult<MonoType> {
+    fn instantiate_cons(&self, cons: &Ident) -> (Vec<TypeBase>, TypeBase) {
+        let cons_decl = self.cons_env[cons].clone();
+        let data_decl = self.data_env[&cons_decl.data].clone();
+        if data_decl.gens.is_empty() {
+            let pars = cons_decl.pars.clone();
+            let res = TypeBase::App(cons_decl.data, Vec::new());
+            (pars, res)
+        } else {
+            let map: HashMap<_, _> = data_decl
+                .gens
+                .iter()
+                .map(|x| (*x, TypeBase::rename_type(x)))
+                .collect();
+            let pars = cons_decl.pars.iter().map(|typ| typ.subst(&map)).collect();
+            let gens = data_decl.gens.iter().map(|x| map[&x].clone()).collect();
+            let res = TypeBase::App(cons_decl.data, gens);
+            (pars, res)
+        }
+    }
+
+    fn instantiate_extcall(&self, name: &InternStr) -> TypeBase {
+        let decl = self.extern_env[name].clone();
+        if decl.gens.is_empty() {
+            decl.typ.clone()
+        } else {
+            let map: HashMap<_, _> = decl
+                .gens
+                .iter()
+                .map(|x| (*x, TypeBase::rename_type(x)))
+                .collect();
+            decl.typ.subst(&map)
+        }
+    }
+
+    fn infer_expr(&mut self, expr: &Expr) -> TypeBase {
         match expr {
-            Expr::Lit { lit, .. } => Ok(TypeBase::Lit(lit.get_lit_type())),
-            Expr::Var { var, .. } => match self.val_env.get(&var) {
-                Some(pty) => Ok(self.instantiate(pty)),
-                None => Err(InferError::VarNotInScope),
-            },
-            Expr::Prim { prim, args, .. } => {
-                let prim = TypeBase::get_builtin_type(*prim);
-                let args = args
+            Expr::Lit { lit, .. } => TypeBase::Lit(lit.get_lit_type()),
+            Expr::Var { var, .. } => {
+                if self.func_env.get(var).is_some() {
+                    self.instantiate_func(var)
+                } else if let Some(typ) = self.val_env.get(var) {
+                    typ.clone()
+                } else {
+                    panic!("unbounded variable!");
+                }
+            }
+            Expr::Prim { prim, args, span } => {
+                let args_ty = args
                     .iter()
                     .map(|arg| self.infer_expr(arg))
-                    .collect::<InferResult<Vec<_>>>()?;
-                let res = TypeBase::Cell(self.new_cell());
-                let prim_ty = TypeBase::Fun(args, Box::new(res.clone()));
-                self.unify(&prim, &prim_ty)?;
-                Ok(res)
+                    .collect::<Vec<_>>();
+                let pars_ty = prim.get_pars_type();
+                let errs = self.unify_vec(&args_ty, &pars_ty);
+                if !errs.is_empty() {
+                    self.error.push(InferError {
+                        title: InferErrorTitle::PrimAppError,
+                        spans: vec![("here is the application:", span.clone())],
+                        errs,
+                    });
+                }
+                prim.get_res_type()
             }
             Expr::Fun { pars, body, .. } => {
                 let pars = pars
                     .iter()
                     .map(|par| {
-                        let cell = self.new_cell();
-                        self.val_env.insert(*par, TypeBase::Cell(cell.clone()));
-                        TypeBase::Cell(cell)
+                        let typ = TypeBase::new_type();
+                        self.val_env.insert(*par, typ.clone());
+                        typ
                     })
                     .collect();
-                let res = self.infer_expr(body)?;
-                Ok(TypeBase::Fun(pars, Box::new(res)))
+                let res = self.infer_expr(body);
+                TypeBase::Fun(pars, Box::new(res))
             }
-            Expr::App { func, args, .. } => {
-                let func = self.infer_expr(func)?;
-                let args = args
+            Expr::App { func, args, span } => {
+                let func_ty = self.infer_expr(func);
+                let args_ty = args
                     .iter()
                     .map(|arg| self.infer_expr(arg))
-                    .collect::<InferResult<Vec<_>>>()?;
-                let res = TypeBase::Cell(self.new_cell());
-                let func_ty = TypeBase::Fun(args, Box::new(res.clone()));
-                self.unify(&func, &func_ty)?;
-                Ok(res)
+                    .collect::<Vec<_>>();
+                let res_ty = TypeBase::new_type();
+                let func_ty2 = TypeBase::Fun(args_ty.clone(), Box::new(res_ty.clone()));
+                let errs = self.unify(&func_ty, &func_ty2);
+                if !errs.is_empty() {
+                    self.error.push(InferError {
+                        title: InferErrorTitle::FuncAppError,
+                        spans: vec![("here is the application:", span.clone())],
+                        errs,
+                    });
+                }
+                res_ty
             }
-            Expr::ExtCall {
-                func: _, args: _, ..
+            Expr::ExtCall { func, args, span } => {
+                let func_ty = self.instantiate_extcall(func);
+                let args_ty = args
+                    .iter()
+                    .map(|arg| self.infer_expr(arg))
+                    .collect::<Vec<_>>();
+                let res_ty = TypeBase::new_type();
+                let func_ty2 = TypeBase::Fun(args_ty.clone(), Box::new(res_ty.clone()));
+                let errs = self.unify(&func_ty, &func_ty2);
+                if !errs.is_empty() {
+                    self.error.push(InferError {
+                        title: InferErrorTitle::ExtCallError,
+                        spans: vec![("here is the application:", span.clone())],
+                        errs,
+                    });
+                }
+                res_ty
+            }
+            Expr::Cons { cons, args, span } => {
+                let (pars_ty, res_ty) = self.instantiate_cons(cons);
+                let args_ty = args
+                    .iter()
+                    .map(|arg| self.infer_expr(arg))
+                    .collect::<Vec<_>>();
+                let errs = self.unify_vec(&args_ty, &pars_ty);
+                if !errs.is_empty() {
+                    self.error.push(InferError {
+                        title: InferErrorTitle::ConstructorError,
+                        spans: vec![("here is the source code:", span.clone())],
+                        errs,
+                    });
+                }
+                res_ty
+            }
+            Expr::Ifte {
+                cond, trbr, flbr, ..
             } => {
-                todo!()
+                let cond_ty = self.infer_expr(cond);
+                let errs = self.unify(&cond_ty, &TypeBase::Lit(LitType::Bool));
+                if !errs.is_empty() {
+                    self.error.push(InferError {
+                        title: InferErrorTitle::IfteCondError,
+                        spans: vec![("here is the source code:", cond.span().clone())],
+                        errs,
+                    });
+                }
+                let trbr_ty = self.infer_expr(trbr);
+                let flbr_ty = self.infer_expr(flbr);
+                let errs = self.unify(&trbr_ty, &flbr_ty);
+                if !errs.is_empty() {
+                    self.error.push(InferError {
+                        title: InferErrorTitle::IfteBrchError,
+                        spans: vec![
+                            ("here is the true-branch:", trbr.span().clone()),
+                            ("here is the false-branch:", flbr.span().clone()),
+                        ],
+                        errs,
+                    });
+                }
+                trbr_ty
             }
-            Expr::Cons {
-                cons: _, args: _, ..
+            Expr::Begin { block, .. } => self.infer_block(block),
+            Expr::Case { expr, rules, .. } => {
+                let expr_ty = self.infer_expr(expr);
+                let res_ty = TypeBase::new_type();
+                for rule in rules {
+                    let Rule { patn, body, .. } = rule;
+                    self.infer_pattern(patn, &expr_ty);
+                    let body_ty = self.infer_expr(body);
+                    let errs = self.unify(&body_ty, &res_ty);
+                    if !errs.is_empty() {
+                        self.error.push(InferError {
+                            title: InferErrorTitle::CaseBrchError,
+                            spans: vec![("here is the branch body:", body.span().clone())],
+                            errs,
+                        });
+                    }
+                }
+                res_ty
+            }
+            Expr::Letrec { decls, block, .. } => {
+                for decl in decls {
+                    self.infer_decl(decl);
+                }
+                self.infer_block(block)
+            }
+        }
+    }
+
+    fn infer_block(&mut self, block: &Block) -> TypeBase {
+        let Block { stmts, retn, .. } = block;
+        for stmt in stmts {
+            match stmt {
+                Stmt::Bind {
+                    bind, typ, expr, ..
+                } => {
+                    let expr_ty = self.infer_expr(expr);
+                    if let Some(typ) = typ {
+                        let typ_ty = self.read_type(typ);
+                        let errs = self.unify(&expr_ty, &typ_ty);
+                        if !errs.is_empty() {
+                            self.error.push(InferError {
+                                title: InferErrorTitle::LetAnnoError,
+                                spans: vec![
+                                    ("here is the expression:", expr.span().clone()),
+                                    ("here is the type annotation:", typ.span().clone()),
+                                ],
+                                errs,
+                            });
+                        }
+                    }
+                    self.val_env.insert(*bind, expr_ty);
+                }
+                Stmt::Do { expr, .. } => {
+                    let _expr_ty = self.infer_expr(expr);
+                }
+            }
+        }
+        if let Some(retn) = retn {
+            self.infer_expr(retn)
+        } else {
+            TypeBase::Lit(LitType::Unit)
+        }
+    }
+
+    fn infer_pattern(&mut self, patn: &Pattern, matchee: &TypeBase) {
+        match patn {
+            Pattern::Var { var, .. } => {
+                self.val_env.insert(*var, matchee.clone());
+            }
+            Pattern::Lit { lit, span } => {
+                let errs = self.unify(matchee, &TypeBase::Lit(lit.get_lit_type()));
+                if !errs.is_empty() {
+                    self.error.push(InferError {
+                        title: InferErrorTitle::PatternError,
+                        spans: vec![("here is the pattern:", span.clone())],
+                        errs,
+                    });
+                }
+            }
+            Pattern::Cons { cons, pars, span } => {
+                let (pars_ty, res_ty) = self.instantiate_cons(cons);
+                if pars.len() != pars_ty.len() {
+                    self.error.push(InferError {
+                        title: InferErrorTitle::PatternError,
+                        spans: vec![("here is the pattern:", span.clone())],
+                        errs: vec![],
+                    });
+                } else {
+                    pars.iter().zip(pars_ty.iter()).for_each(|(par, ty)| {
+                        self.infer_pattern(par, &ty);
+                    });
+                }
+                let errs = self.unify(&matchee, &res_ty);
+                if !errs.is_empty() {
+                    self.error.push(InferError {
+                        title: InferErrorTitle::PatternError,
+                        spans: vec![("here is the pattern:", span.clone())],
+                        errs,
+                    });
+                }
+            }
+            Pattern::Wild { .. } => {}
+        }
+    }
+
+    fn infer_decl(&mut self, decl: &Decl) {
+        match decl {
+            Decl::Func {
+                name,
+                gens,
+                pars,
+                res,
+                body,
+                span,
             } => {
-                todo!()
+                self.generic_set.extend(gens.iter());
+                let pars: Vec<(Ident, TypeBase)> = pars
+                    .iter()
+                    .map(|(par, typ)| {
+                        let typ = self.read_type(typ);
+                        (*par, typ)
+                    })
+                    .collect();
+                let res_ty = self.read_type(res);
+                let decl = FuncDecl {
+                    name: *name,
+                    gens: gens.clone(),
+                    pars: pars.clone(),
+                    res: res_ty.clone(),
+                };
+                self.func_env.insert(*name, decl);
+                for (par, typ) in pars {
+                    self.val_env.insert(par, typ);
+                }
+                let body_ty = self.infer_expr(body);
+                let errs = self.unify(&body_ty, &res_ty);
+                if !errs.is_empty() {
+                    self.error.push(InferError {
+                        title: InferErrorTitle::FuncDeclError,
+                        spans: vec![("here is the declaration:", span.clone())],
+                        errs,
+                    });
+                }
             }
-            Expr::Ifte { .. } => {
-                todo!()
+            Decl::Data {
+                name, pars, vars, ..
+            } => {
+                self.generic_set.extend(pars.iter());
+                let cons = vars
+                    .iter()
+                    .map(|var| {
+                        let Varient { cons, pars, .. } = var;
+                        let pars = pars.iter().map(|par| self.read_type(par)).collect();
+                        let decl = DataCons {
+                            cons: *cons,
+                            pars,
+                            data: *name,
+                        };
+                        self.cons_env.insert(*cons, decl);
+                        *cons
+                    })
+                    .collect();
+                let decl = DataDecl {
+                    name: *name,
+                    gens: pars.clone(),
+                    vars: cons,
+                };
+                self.data_env.insert(*name, decl);
             }
-            Expr::Begin { .. } => {
-                todo!()
+            Decl::Type {
+                name, pars, typ, ..
+            } => {
+                self.generic_set.extend(pars.iter());
+                let decl = TypeDecl {
+                    name: *name,
+                    gens: pars.clone(),
+                    typ: self.read_type(typ),
+                };
+                self.type_env.insert(*name, decl);
             }
-            Expr::Case { .. } => {
-                todo!()
+            Decl::Extern {
+                name, gens, typ, ..
+            } => {
+                self.generic_set.extend(gens.iter());
+                let decl = ExternDecl {
+                    name: *name,
+                    gens: gens.clone(),
+                    typ: self.read_type(typ),
+                };
+                self.extern_env.insert(*name, decl);
             }
-            Expr::Letrec { .. } => {
-                todo!()
+        }
+    }
+
+    fn read_type(&mut self, typ: &Type) -> TypeBase {
+        match typ {
+            Type::Lit { lit, .. } => TypeBase::Lit(*lit),
+            Type::Var { var, .. } => {
+                if self.generic_set.contains(var) {
+                    TypeBase::Gen(*var)
+                } else {
+                    TypeBase::Var(*var)
+                }
             }
+            Type::Fun { pars, res, .. } => {
+                let pars = pars.iter().map(|par| self.read_type(par)).collect();
+                let res = self.read_type(res);
+                TypeBase::Fun(pars, Box::new(res))
+            }
+            Type::App { cons, args, .. } => {
+                let args = args.iter().map(|arg| self.read_type(arg)).collect();
+                TypeBase::App(*cons, args)
+            }
+        }
+    }
+
+    fn merge_errors(&mut self) {
+        let mut vec: Vec<_> = self.error.drain(..).collect();
+        for infer_err in &mut vec {
+            for unify_err in &mut infer_err.errs {
+                *unify_err = self.merge_unify_error(&unify_err);
+            }
+        }
+        self.error = vec;
+    }
+
+    fn merge_unify_error(&mut self, err: &UnifyError) -> UnifyError {
+        match err {
+            UnifyError::CantUnify(lhs, rhs) => {
+                let lhs = self.merge(lhs);
+                let rhs = self.merge(rhs);
+                UnifyError::CantUnify(lhs, rhs)
+            }
+            UnifyError::CantUnifyVec(lhs, rhs) => {
+                let lhs = lhs.iter().map(|ty| self.merge(ty)).collect();
+                let rhs = rhs.iter().map(|ty| self.merge(ty)).collect();
+                UnifyError::CantUnifyVec(lhs, rhs)
+            }
+            UnifyError::OccurCheckFailed(x, ty) => {
+                let old = self.unify_subst.remove(&x);
+                let ty = self.merge(ty);
+                if let Some(old) = old {
+                    self.unify_subst.insert(*x, old);
+                }
+                UnifyError::OccurCheckFailed(*x, ty)
+            }
+            UnifyError::DiffConstr(cons1, cons2) => UnifyError::DiffConstr(*cons1, *cons2),
         }
     }
 }
 
 #[test]
-#[ignore = "fails after syntax change"]
+#[ignore]
 fn type_check_test() {
     use super::parser::*;
     use super::renamer::Renamer;
     let string = r#"
-let combi = fun(x) => x;
-let combk = fun(x,y) => x;
-let combkc = fun(x) => fun(y) => x;
-let combs = fun(f,g,x) => f(x)(g(x));
-combi
+letrec
+    extern print_int : fn(Int) -> ();
+    data List[T] =
+    | Cons(T,List[T])
+    | Nil
+    end
+    func length[T](lst: List[T]): Int =
+        case lst of
+        | Cons(head,tail) =>
+            @iadd(length(tail),length(head))
+        | Nil => 0
+        end
+in
+    #print_int(length(Cons(1,Cons(2,Nil))));
+end
 "#;
 
     let mut par = Parser::new(string);
     let mut expr = parse_expr(&mut par).unwrap();
-    println!("{}", expr);
+    // println!("{}", expr);
     Renamer::run(&mut expr).unwrap();
-    println!("{}", expr);
+    // println!("{}", expr);
     let mut tych = Infer::new();
-    tych.infer_expr(&expr).unwrap();
-    for (k, v) in tych.val_env.iter() {
-        println!("{k} : {v}");
+    tych.infer_expr(&expr);
+    tych.merge_errors();
+    assert!(!tych.error.is_empty());
+    /*
+    for err in &tych.error {
+        println!("{err:#?}");
     }
+    */
 }
