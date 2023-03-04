@@ -1,4 +1,6 @@
-use super::*;
+use itertools::Itertools;
+
+use super::{infer::InferError, *};
 use std::fmt;
 
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
@@ -110,19 +112,20 @@ impl Diagnostic {
 
     /// minimal_report shows only span, instead of source code.
     pub fn minimal_report(&self, verbosity: u8) -> String {
-        let mut output = format!("[{}]: {}\n", self.level, &self.title);
+        let mut output = format!("[{}] {}\n", self.level, &self.title);
         for descr in &self.descriptions {
             if descr.verbosity > verbosity {
                 // ignore those description with higher verbosity
                 continue;
             }
+            output.push_str(&descr.message);
+            output.push('\n');
             match &descr.span {
                 Some(span) => {
-                    output.push_str(&format!("{}:\n{}\n", span, descr.message,));
+                    output.push_str(&format!("{}\n", span));
                 }
                 None => {
-                    output.push_str(&descr.message);
-                    output.push('\n');
+                    // do nothing
                 }
             }
         }
@@ -130,77 +133,158 @@ impl Diagnostic {
     }
 
     pub fn report(&self, source: &str, verbosity: u8) -> String {
-        let mut output = format!("[{}]: {}\n", self.level, &self.title);
+        let mut output = format!("[{}] {}\n", self.level, &self.title);
         let text = source.lines().collect::<Vec<&str>>();
         for descr in &self.descriptions {
             if descr.verbosity > verbosity {
                 // ignore those description with higher verbosity
                 continue;
             }
+            output.push_str(&descr.message);
+            output.push('\n');
             match &descr.span {
+                // one-line span
+                Some(span) if span.start.row == span.end.row => {
+                    let row = span.start.row;
+                    let head_width = (1 + row).to_string().len();
+                    let spaces = span.start.col;
+                    let waves = span.end.col - span.start.col - 2;
+                    output.push_str(&format!("{:<head_width$} | {}\n", row + 1, text[row]));
+                    output.push_str(&format!(
+                        "{:<head_width$} | {:<spaces$}^{:~<waves$}^\n",
+                        "", "", ""
+                    ));
+                }
+                // more than one line
                 Some(span) => {
                     let row_range = std::ops::Range {
                         start: span.start.row,
                         end: span.end.row + 1,
                     };
-
-                    let mut vec: Vec<(usize, usize)> = Vec::new();
-                    if span.start.row == span.end.row {
-                        vec.push((span.start.col, span.end.col))
-                    } else {
-                        for row in row_range.clone() {
-                            if row == span.start.row {
-                                vec.push((span.start.col, text[row].len()))
-                            } else if row == span.end.row {
-                                vec.push((0, span.end.col))
-                            } else {
-                                vec.push((0, text[row].len()))
-                            }
-                        }
-                    }
-
-                    //println!("range = {:?}",range);
                     let head_width = (1 + span.end.row).to_string().len();
-
-                    let zipped = row_range.zip(vec.into_iter());
-
-                    for (row, (s, e)) in zipped {
-                        // print header "xxx | ", where xxx is the line number
-                        output.push_str(&format!("{:>.*} | {}\n", head_width, row + 1, text[row]));
-
-                        output.push_str(&format!("{:>.*} | ", head_width, ' '));
-
-                        for _ in 0..s {
-                            output.push(' ');
-                        }
-
+                    for row in row_range {
                         if row == span.start.row {
-                            output.push('^');
-                            for _ in s + 1..e {
-                                output.push('~');
-                            }
+                            let spaces = span.start.col;
+                            let waves = text[row].len() - spaces - 1;
+                            output.push_str(&format!("{:<head_width$} | {}\n", row + 1, text[row]));
+                            output.push_str(&format!(
+                                "{:<head_width$} | {:<spaces$}^{:~<waves$}\n",
+                                "", "", ""
+                            ));
                         } else if row == span.end.row {
-                            for _ in s..e - 1 {
-                                output.push('~');
-                            }
-                            output.push('^');
+                            let waves = span.end.col;
+                            output.push_str(&format!("{:<head_width$} | {}\n", row + 1, text[row]));
+                            output.push_str(&format!("{:<head_width$} | {:~<waves$}^\n", "", ""));
                         } else {
-                            for _ in s..e {
-                                output.push('~');
-                            }
+                            output.push_str(&format!("{:<head_width$} | {}\n", row + 1, text[row]));
                         }
-                        output.push('\n');
                     }
-                    output.push_str(&descr.message);
-                    output.push('\n');
                 }
                 None => {
-                    output.push_str(&descr.message);
-                    output.push('\n');
+                    // do nothing
                 }
             }
         }
         output
+    }
+}
+
+pub trait ToDiagnostic {
+    fn to_diagnostic(&self) -> Diagnostic;
+}
+
+impl ToDiagnostic for parser::ParseError {
+    fn to_diagnostic(&self) -> Diagnostic {
+        match self {
+            parser::ParseError::LexerError(span, msg) => Diagnostic::error("lexer error")
+                .line(msg.clone())
+                .line_span(span.clone(), "failed to read token here"),
+            parser::ParseError::Unexpected(span, found, expect) => {
+                Diagnostic::error("parser Error: unexpected Token")
+                    .line(format!(
+                        "found token {:?}, expected token {:?}",
+                        found, expect
+                    ))
+                    .line_span(span.clone(), "unexpected token is here")
+            }
+            parser::ParseError::UnexpectedMany(span, found, expect) => {
+                Diagnostic::error("parser error: unexpected Token")
+                    .line(format!("found token {:?},", found))
+                    .line(format!("expected one token of {:?}", expect))
+                    .line_span(span.clone(), "unexpected token is here")
+            }
+            parser::ParseError::UnknownBuiltin(span, str) => {
+                Diagnostic::error("parser error: unknown builtin primitive")
+                    .line(format!("found unknown primitive {:?}", str))
+                    .line_span(span.clone(), "unknown primitive is here")
+            }
+        }
+    }
+}
+
+impl ToDiagnostic for renamer::RenameError {
+    fn to_diagnostic(&self) -> Diagnostic {
+        match self {
+            renamer::RenameError::UnboundedValueVariable(span, ident) => {
+                Diagnostic::error("scope error: unbounded value variable")
+                    .line(format!("found unbounded variable {ident}"))
+                    .line_span(span.clone(), "unbounded variable is here")
+            }
+            renamer::RenameError::UnboundedTypeVariable(span, ident) => {
+                Diagnostic::error("scope error: unbounded type variable")
+                    .line(format!("found unbounded variable {ident}"))
+                    .line_span(span.clone(), "unbounded variable is here")
+            }
+            renamer::RenameError::UnboundedConstructorVariable(span, ident) => {
+                Diagnostic::error("scope error: unbounded constructor variable")
+                    .line(format!("found unbounded variable {ident}"))
+                    .line_span(span.clone(), "unbounded variable is here")
+            }
+            renamer::RenameError::UndefinedExternalFunction(span, ident) => {
+                Diagnostic::error("scope error: unbounded type variable")
+                    .line(format!("found unbounded variable {ident}"))
+                    .line_span(span.clone(), "unbounded variable is here")
+            }
+            renamer::RenameError::MultipuleDefinition(span, ident) => {
+                Diagnostic::error("scope error: multiple definitions of same variable")
+                    .line(format!("multiple definitions of {ident}"))
+                    .line_span(span.clone(), "multiple definitions are here")
+            }
+            renamer::RenameError::MultipuleExternalDefinition(span, ident) => {
+                Diagnostic::error("scope error: multiple external function definitions")
+                    .line(format!("multiple definitions of {ident}"))
+                    .line_span(span.clone(), "multiple definitions are here")
+            }
+        }
+    }
+}
+
+impl ToDiagnostic for infer::InferError {
+    fn to_diagnostic(&self) -> Diagnostic {
+        let InferError { title, spans, errs } = self;
+        let mut diag = Diagnostic::error(format!("type error: {title:?}"));
+        for (msg, span) in spans {
+            diag = diag.line_span(span.clone(), msg.clone());
+        }
+        for err in errs {
+            match err {
+                infer::UnifyError::CantUnify(lhs, rhs) => {
+                    diag = diag.line(format!("can't unify \"{lhs}\" with \"{rhs}\""));
+                }
+                infer::UnifyError::CantUnifyVec(lhs, rhs) => {
+                    let lhs = lhs.iter().format(",");
+                    let rhs = rhs.iter().format(",");
+                    diag = diag.line(format!("can't unify [{lhs}] with [{rhs}]"));
+                }
+                infer::UnifyError::OccurCheckFailed(x, ty) => {
+                    diag = diag.line(format!("occur check fail {x} in \"{ty}\""));
+                }
+                infer::UnifyError::DiffConstr(lhs, rhs) => {
+                    diag = diag.line(format!("can't unify \"{lhs}\" with \"{rhs}\""));
+                }
+            }
+        }
+        diag
     }
 }
 
@@ -211,31 +295,33 @@ fn diagnostic_test() {
 1234567890
 "#;
 
-    let span = Span::new(Position::new(0, 5, 6), Position::new(2, 3, 25));
+    let span = Span::new(Position::new(0, 5, 5), Position::new(2, 5, 25));
     let diag = Diagnostic::error("Error Name")
         .line("some error discreption")
-        .line_span(span, "something spanned error discreption")
+        .line_span(span, "some spanned error discreption")
         .line_verb(100, "this should not appear!");
 
+    // println!("{}", diag.minimal_report(30));
     assert_eq!(
         diag.minimal_report(30),
-        r#"[Error]: Error Name
+        r#"[Error] Error Name
 some error discreption
-from line 1, col 6 to line 3, col 4:
-something spanned error discreption
+some spanned error discreption
+from line 1, col 6 to line 3, col 6
 "#
     );
+
+    // println!("{}", diag.report(source, 30));
     assert_eq!(
         diag.report(source, 30),
-        r#"[Error]: Error Name
+        r#"[Error] Error Name
 some error discreption
+some spanned error discreption
 1 | 1234567890
   |      ^~~~~
 2 | 1234567890
-  | ~~~~~~~~~~
 3 | 1234567890
-  | ~~^
-something spanned error discreption
+  | ~~~~~^
 "#
     );
 }

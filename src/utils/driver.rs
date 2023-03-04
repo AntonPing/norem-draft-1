@@ -7,14 +7,13 @@ use std::process;
 
 use crate::backend;
 use crate::frontend;
+use crate::frontend::diagnostic::ToDiagnostic;
 
 #[derive(Debug)]
 pub enum TopError {
-    ParseError(crate::frontend::parser::ParseError),
-    RenameError(Vec<crate::frontend::renamer::RenameError>),
-    InferError(Vec<crate::frontend::infer::InferError>),
-    IOError(std::io::Error),
-    LinkError,
+    ParseError(frontend::parser::ParseError),
+    RenameError(Vec<frontend::renamer::RenameError>),
+    InferError(Vec<frontend::infer::InferError>),
 }
 
 impl Display for TopError {
@@ -35,13 +34,6 @@ impl Display for TopError {
                 for err in errs {
                     write!(f, "Cause: {err:?}")?;
                 }
-            }
-            TopError::IOError(err) => {
-                write!(f, "Error: an IO error occured!")?;
-                write!(f, "Cause: {err:?}")?;
-            }
-            TopError::LinkError => {
-                write!(f, "Error: an linking error occured!")?;
             }
         }
         Ok(())
@@ -68,14 +60,8 @@ impl From<Vec<frontend::infer::InferError>> for TopError {
     }
 }
 
-impl From<std::io::Error> for TopError {
-    fn from(value: std::io::Error) -> Self {
-        TopError::IOError(value)
-    }
-}
-
-pub fn compile_source(source: String, dump: bool) -> Result<String, TopError> {
-    let mut par = frontend::parser::Parser::new(&source);
+pub fn compile_source(source: &String, dump: bool) -> Result<String, TopError> {
+    let mut par = frontend::parser::Parser::new(source);
     let mut expr = frontend::parser::parse_expr(&mut par)?;
     frontend::renamer::Renamer::run(&mut expr)?;
     frontend::infer::Infer::run(&expr)?;
@@ -119,15 +105,43 @@ pub fn compile_source(source: String, dump: bool) -> Result<String, TopError> {
     Ok(text)
 }
 
-pub fn run_compile(input: &PathBuf, output: &PathBuf, dump: bool) -> Result<(), TopError> {
+pub fn run_compile(input: &PathBuf, output: &PathBuf, dump: bool) -> Result<(), std::io::Error> {
     let source = fs::read_to_string(input)?;
-    let result = compile_source(source, dump)?;
-    let mut target = fs::File::create(output)?;
-    target.write(result.as_bytes())?;
-    Ok(())
+    let result = compile_source(&source, dump);
+    match result {
+        Ok(result) => {
+            let mut target = fs::File::create(output)?;
+            target.write(result.as_bytes())?;
+            Ok(())
+        }
+        Err(err) => {
+            match err {
+                TopError::ParseError(err) => {
+                    let diag = err.to_diagnostic();
+                    println!("{}", diag.report(&source, 30));
+                }
+                TopError::RenameError(errs) => {
+                    for err in errs {
+                        let diag = err.to_diagnostic();
+                        println!("{}", diag.report(&source, 30));
+                    }
+                }
+                TopError::InferError(errs) => {
+                    for err in errs {
+                        let diag = err.to_diagnostic();
+                        println!("{}", diag.report(&source, 30));
+                    }
+                }
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "compilation failed!",
+            ))
+        }
+    }
 }
 
-pub fn run_link(code: &PathBuf, library: &PathBuf, output: &PathBuf) -> Result<(), TopError> {
+pub fn run_link(code: &PathBuf, library: &PathBuf, output: &PathBuf) -> Result<(), std::io::Error> {
     if cfg!(target_os = "windows") {
         println!(
             "[WARNING] You are running one a windows os.\
@@ -145,7 +159,10 @@ Please make sure a C compiler is installed and 'cc' command is avaliable."
         Ok(())
     } else {
         std::io::stdout().write(&out.stderr).unwrap();
-        Err(TopError::LinkError)
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "link failed",
+        ))
     }
 }
 
@@ -154,7 +171,7 @@ pub fn run_compile_link(
     library: &PathBuf,
     output: &PathBuf,
     dump: bool,
-) -> Result<(), TopError> {
+) -> Result<(), std::io::Error> {
     let temp = PathBuf::from("output.temp.c");
     run_compile(input, &temp, dump)?;
     run_link(&temp, library, output)?;
