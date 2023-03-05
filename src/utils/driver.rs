@@ -63,9 +63,14 @@ impl From<Vec<frontend::infer::InferError>> for TopError {
 pub fn compile_source(source: &String, dump: bool) -> Result<String, TopError> {
     let mut par = frontend::parser::Parser::new(source);
     let mut expr = frontend::parser::parse_expr(&mut par)?;
+    if dump {
+        println!("parser:\n{expr}");
+    }
     frontend::renamer::Renamer::run(&mut expr)?;
+    if dump {
+        println!("renamer:\n{expr}");
+    }
     frontend::infer::Infer::run(&expr)?;
-
     let expr = backend::normalize::Normalize::run(&expr);
     if dump {
         println!("normalize:\n{expr}");

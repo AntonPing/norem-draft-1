@@ -7,5 +7,6 @@ pub mod position;
 pub mod lexer;
 pub mod parser;
 pub mod renamer;
+pub mod context;
 pub mod infer;
 pub mod diagnostic;
