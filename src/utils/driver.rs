@@ -70,8 +70,8 @@ pub fn compile_source(source: &String, dump: bool) -> Result<String, TopError> {
     if dump {
         println!("renamer:\n{expr}");
     }
-    frontend::infer::Infer::run(&expr)?;
-    let expr = backend::normalize::Normalize::run(&expr);
+    let ctx = frontend::infer::Infer::run(&expr)?;
+    let expr = backend::normalize::Normalize::run(&expr, &ctx);
     if dump {
         println!("normalize:\n{expr}");
     }

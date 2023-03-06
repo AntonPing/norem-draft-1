@@ -4,14 +4,11 @@ letrec
     extern env_int: fn(Int) -> Int;
     extern prog_exit[T]: fn(Int) -> T;
     func fib(n: Int): Int =
-        if @icmpls(n,0) then
-            #prog_exit(1)
-        else if @icmpeq(n,0) then
-            0
-        else if @icmpeq(n,1) then
-            1
-        else
-            @iadd(fib(@isub(n,1)),fib(@isub(n,2)))
+        case n of
+        | 0 => 0
+        | 1 => 1
+        | n => @iadd(fib(@isub(n,1)),fib(@isub(n,2)))
+        end    
 in
     let n = #env_int(1);
     let res = fib(n);

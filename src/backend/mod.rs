@@ -5,6 +5,7 @@ pub mod anf;
 pub mod anf_build;
 pub mod anf_equiv;
 pub mod visitor;
+pub mod patn_mat;
 pub mod normalize;
 pub mod dead_elim;
 pub mod const_fold;

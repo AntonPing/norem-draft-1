@@ -179,7 +179,7 @@ impl Context {
                 .map(|x| (*x, TypeBase::rename_type(x)))
                 .collect();
             let pars = cons_decl.flds.iter().map(|typ| typ.subst(&map)).collect();
-            let args = data_decl.pars.iter().map(|x| map[&x].clone()).collect();
+            let args = data_decl.pars.iter().map(|x| map[x].clone()).collect();
             let app = TypeBase::App(cons_decl.data, args);
             (pars, app)
         }

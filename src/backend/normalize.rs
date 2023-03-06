@@ -1,56 +1,25 @@
+use super::patn_mat::PatnMatrix;
 use super::*;
 use crate::frontend::ast::*;
-use std::collections::{HashMap, HashSet};
-
-#[allow(dead_code)]
-pub struct DataCons {
-    cons: Ident,
-    pars: Vec<Type>,
-    // belongs to which DataDecl
-    data: Ident,
+use crate::frontend::context::Context;
+pub struct Normalize<'a> {
+    ctx: &'a Context,
 }
 
-#[allow(dead_code)]
-pub struct DataDecl {
-    name: Ident,
-    pars: Vec<Ident>,
-    // reference to DataCons
-    cons: Vec<Ident>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColType {
+    Any,
+    Data(Ident),
+    Lit(LitType),
 }
 
-#[allow(dead_code)]
-pub struct TypeDecl {
-    name: Ident,
-    pars: Vec<Ident>,
-    typ: Type,
-}
-
-pub struct Normalize {
-    cons_env: HashMap<Ident, DataCons>,
-    data_env: HashMap<Ident, DataDecl>,
-    type_env: HashMap<Ident, TypeDecl>,
-}
-
-impl Normalize {
-    pub fn new() -> Normalize {
-        Normalize {
-            cons_env: HashMap::new(),
-            data_env: HashMap::new(),
-            type_env: HashMap::new(),
-        }
+impl<'a> Normalize<'a> {
+    pub fn new(ctx: &'a Context) -> Normalize<'a> {
+        Normalize { ctx }
     }
-    pub fn run(expr: &Expr) -> MExpr {
-        let mut pass = Normalize::new();
+    pub fn run(expr: &Expr, ctx: &'a Context) -> MExpr {
+        let mut pass = Normalize::new(ctx);
         pass.normalize_top(expr)
-    }
-
-    fn get_cons_index(&self, cons: &Ident) -> usize {
-        let data = self.cons_env[cons].data;
-        self.data_env[&data]
-            .cons
-            .iter()
-            .position(|cons2| *cons == *cons2)
-            .unwrap()
     }
 
     fn normalize_top(&mut self, expr: &Expr) -> MExpr {
@@ -66,15 +35,24 @@ impl Normalize {
 
     // translate from Expr to MExpr, basically a lowering pass
     // order of evaluation for function arguments: from right to left
-    fn normalize(&mut self, expr: &Expr, hole: Ident, ctx: MExpr) -> MExpr {
+    fn normalize(&mut self, expr: &Expr, hole: Ident, rest: MExpr) -> MExpr {
         match expr {
-            Expr::Lit { lit, .. } => subst(ctx, hole, (*lit).into()),
-            Expr::Var { var, .. } => subst(ctx, hole, Atom::Var(*var)),
+            Expr::Lit { lit, .. } => MExpr::UnOp {
+                bind: hole,
+                prim: UnOpPrim::Move,
+                arg1: (*lit).into(),
+                cont: Box::new(rest),
+            },
+            Expr::Var { var, .. } => MExpr::UnOp {
+                bind: hole,
+                prim: UnOpPrim::Move,
+                arg1: Atom::Var(*var),
+                cont: Box::new(rest),
+            },
             Expr::Prim { prim, args, .. } => {
-                // normalize(@iadd(e1,e2), hole, ctx) =
-                // normalize(e2,x2,normalize(e1,x1, let hole = iadd(x1,x2) in ctx))
+                // normalize(@prim(e1,e2), hole, rest) =
+                // normalize(e2,x2,normalize(e1,x1, let hole = prim(x1,x2) in rest))
                 let tempvars: Vec<Ident> = args.iter().map(|_| Ident::generate('x')).collect();
-
                 pub enum OpPrim {
                     Unary(UnOpPrim),
                     Binary(BinOpPrim),
@@ -115,7 +93,7 @@ impl Normalize {
                             bind: hole,
                             prim,
                             arg1: Atom::Var(tempvars[0]),
-                            cont: Box::new(ctx),
+                            cont: Box::new(rest),
                         }
                     }
                     OpPrim::Binary(prim) => {
@@ -125,7 +103,7 @@ impl Normalize {
                             prim,
                             arg1: Atom::Var(tempvars[0]),
                             arg2: Atom::Var(tempvars[1]),
-                            cont: Box::new(ctx),
+                            cont: Box::new(rest),
                         }
                     }
                 };
@@ -136,8 +114,8 @@ impl Normalize {
                     .fold(stmt, |res, (bind, arg)| self.normalize(arg, bind, res))
             }
             Expr::Fun { pars, body, .. } => {
-                // normalize(fun(x,y) => e, hole, ctx) =
-                // let f(x,y) = normalize_top(e) in ctx[hole:=f]
+                // normalize(fun(x1,x2,...) => e, hole, ctx) =
+                // let f(x1,x2,...) = normalize_top(e) in ctx[hole:=f]
                 let funcvar = Ident::generate('f');
                 MExpr::LetIn {
                     decls: vec![MDecl {
@@ -145,23 +123,29 @@ impl Normalize {
                         pars: pars.clone(),
                         body: self.normalize_top(body),
                     }],
-                    cont: Box::new(subst(ctx, hole, Atom::Var(funcvar))),
+                    cont: Box::new(MExpr::UnOp {
+                        bind: hole,
+                        prim: UnOpPrim::Move,
+                        arg1: Atom::Var(funcvar),
+                        cont: Box::new(rest),
+                    }),
                 }
             }
             Expr::App { func, args, .. } => {
-                // normalize(e0(e1,..,en), hole, ctx) =
-                // normalize(en,xn,
-                //   ...
-                //     normalize(e1,x1,
-                //       normalize(e0,f,
-                //         let hole = f(x1,...,xn) in ctx))...)
+                /*  normalize(e0(e1,..,en), hole, ctx) =
+                    normalize(en,xn,
+                        ...
+                            normalize(e1,x1,
+                                normalize(e0,f,
+                                    let hole = f(x1,...,xn) in ctx))...)
+                */
                 let funcvar = Ident::generate('f');
                 let argvars: Vec<Ident> = args.iter().map(|_| Ident::generate('x')).collect();
                 let res = MExpr::Call {
                     bind: hole,
                     func: Atom::Var(funcvar),
                     args: argvars.iter().map(|arg| Atom::Var(*arg)).collect(),
-                    cont: Box::new(ctx),
+                    cont: Box::new(rest),
                 };
                 let res = self.normalize(func, funcvar, res);
                 let res = argvars
@@ -172,17 +156,18 @@ impl Normalize {
                 res
             }
             Expr::ExtCall { func, args, .. } => {
-                // normalize(f(e1,..,en), hole, ctx) =
-                // normalize(en,xn,
-                //   ...
-                //     normalize(e1,x1,
-                //       let hole = f(x1,...,xn) in ctx))...)
+                /*  normalize(f(e1,..,en), hole, rest) =
+                        normalize(en,xn,
+                            ...
+                                normalize(e1,x1,
+                                    let hole = f(x1,...,xn) in rest))...)
+                */
                 let argvars: Vec<Ident> = args.iter().map(|_| Ident::generate('x')).collect();
                 let res = MExpr::ExtCall {
                     bind: hole,
                     func: *func,
                     args: argvars.iter().map(|arg| Atom::Var(*arg)).collect(),
-                    cont: Box::new(ctx),
+                    cont: Box::new(rest),
                 };
                 let res = argvars
                     .iter()
@@ -192,25 +177,28 @@ impl Normalize {
                 res
             }
             Expr::Cons { cons, args, .. } => {
-                // normalize(ci(e1,..,en), hole, ctx) =
-                // normalize(en,xn,
-                //   ...
-                //     normalize(e1,x1,
-                //       normalize(e0,f,
-                //         let m = alloc(n);
-                //         store m[0] = i;
-                //         store m[1] = x1;
-                //         ......
-                //         store m[n] = xn;
-                //         let hole = move(m);
-                //         ctx )...)
+                /*
+                normalize(ci(e1,..,en), hole, rest) =
+                normalize(en,xn,
+                    ...
+                        normalize(e1,x1,
+                            normalize(e0,f,
+                                let m = alloc(n);
+                                store m[0] = i;
+                                store m[1] = x1;
+                                ......
+                                store m[n] = xn;
+                                let hole = move(m);
+                                rest
+                ))...)
+                */
                 let m = Ident::generate('m');
                 let argvars: Vec<Ident> = args.iter().map(|_| Ident::generate('x')).collect();
                 let res = MExpr::UnOp {
                     bind: hole,
                     prim: UnOpPrim::Move,
                     arg1: Atom::Var(m),
-                    cont: Box::new(ctx),
+                    cont: Box::new(rest),
                 };
 
                 let res = argvars
@@ -226,11 +214,11 @@ impl Normalize {
                 let res = MExpr::Store {
                     arg1: Atom::Var(m),
                     index: 0,
-                    arg2: Atom::Int(self.get_cons_index(cons) as i64),
+                    arg2: Atom::Int(self.ctx.get_cons_index(cons) as i64),
                     cont: Box::new(res),
                 };
 
-                let arity = self.cons_env[cons].pars.len();
+                let arity = self.ctx.cons_env[cons].flds.len();
 
                 let res = MExpr::Alloc {
                     bind: m,
@@ -256,17 +244,17 @@ impl Normalize {
                             res
                         end,
                         hole,
-                        ctx
+                        rest
                     ) =
 
                     normalize(e1,x1,
                         normalize(e2,x2,
                             ...
                             normalize(en,xn,)
-                                normalize(res,hole,ctx)
+                                normalize(res,hole,rest)
                     ))...)
                 */
-                self.normalize_block(block, hole, ctx)
+                self.normalize_block(block, hole, rest)
             }
             Expr::Case { expr, rules, .. } => {
                 /*
@@ -276,7 +264,7 @@ impl Normalize {
                         ......
                         | pattern_n => e_n-1
                     hole,
-                    ctx
+                    rest
                     ) =
 
                     normalize(etop, o
@@ -285,45 +273,41 @@ impl Normalize {
                             ......
                             a_n-1(..) = e_n;
                         in
-                            compile_match(
+                            compile_match_with(
                                 (o),
                                 (pattern_1)
                                 ......
                                 (pattern_n),
-                                (a_1(..),......,a_n-1(..))
-                            ).chain(hole,ctx)
+                                (a_1(..),......,a_n-1(..)),
+                                hole,
+                                rest
+                            )
                         end
                     )
                 */
                 let etop = Ident::generate('o');
-
+                let objs = vec![etop];
                 let mut decls: Vec<MDecl> = Vec::new();
-
                 let (matrix, acts): (Vec<Vec<_>>, Vec<_>) = rules
                     .into_iter()
                     .map(|rule| {
                         let Rule { patn, body, .. } = rule;
                         let func = Ident::generate('a');
                         let pars = patn.get_freevars();
-                        let args = pars.iter().map(|var| Atom::Var(*var)).collect();
-
+                        let args = pars.clone();
                         let decl = MDecl {
                             func,
                             pars,
                             body: self.normalize_top(body),
                         };
                         decls.push(decl);
-
-                        let act = MExpr::make_tail_call(func, args);
-
+                        let act = (func, args);
                         (vec![patn.clone()], act)
                     })
                     .unzip();
 
-                let objs = vec![etop];
-
                 let mat = PatnMatrix { objs, matrix, acts };
-                let cont = Box::new(self.compile_match(&mat, hole, ctx));
+                let cont = Box::new(self.compile_match(&mat, hole, rest));
                 self.normalize(expr, etop, MExpr::LetIn { decls, cont })
             }
             Expr::Ifte {
@@ -333,13 +317,13 @@ impl Normalize {
                     normalize(
                         if cond then trbr else flbr,
                         hole,
-                        ctx
+                        rest
                     ) =
                     normalize(cond, x,
                         let hole = if x
                             then normalize_top(trbr)
                             else normalize_top(flbr);
-                        ctx
+                        rest
                     )
                 */
                 let x = Ident::generate('x');
@@ -348,7 +332,7 @@ impl Normalize {
                     arg1: Atom::Var(x),
                     brch1: Box::new(self.normalize_top(trbr)),
                     brch2: Box::new(self.normalize_top(flbr)),
-                    cont: Box::new(ctx),
+                    cont: Box::new(rest),
                 };
                 self.normalize(&cond, x, cont)
             }
@@ -384,47 +368,12 @@ impl Normalize {
                             pars: pars.iter().map(|(par, _)| *par).collect(),
                             body: self.normalize_top(body),
                         }),
-                        Decl::Data {
-                            name, pars, vars, ..
-                        } => {
-                            for var in vars {
-                                let Varient { cons, pars, .. } = var;
-                                self.cons_env.insert(
-                                    *cons,
-                                    DataCons {
-                                        cons: *cons,
-                                        pars: pars.clone(),
-                                        data: *name,
-                                    },
-                                );
-                            }
-                            self.data_env.insert(
-                                *name,
-                                DataDecl {
-                                    name: *name,
-                                    pars: pars.clone(),
-                                    cons: vars.iter().map(|var| var.cons).collect(),
-                                },
-                            );
-                            None
-                        }
-                        Decl::Type {
-                            name, pars, typ, ..
-                        } => {
-                            self.type_env.insert(
-                                *name,
-                                TypeDecl {
-                                    name: *name,
-                                    pars: pars.clone(),
-                                    typ: typ.clone(),
-                                },
-                            );
-                            None
-                        }
+                        Decl::Data { .. } => None,
+                        Decl::Type { .. } => None,
                         Decl::Extern { .. } => None,
                     })
                     .collect();
-                let cont = Box::new(self.normalize_block(block, hole, ctx));
+                let cont = Box::new(self.normalize_block(block, hole, rest));
                 MExpr::LetIn { decls, cont }
             }
         }
@@ -445,7 +394,7 @@ impl Normalize {
         stmts.into_iter().rev().fold(res, |cont, stmt| match stmt {
             Stmt::Bind { bind, expr, .. } => self.normalize(expr, *bind, cont),
             Stmt::Do { expr, .. } => {
-                let bind = Ident::generate('w');
+                let bind = Ident::generate('_');
                 self.normalize(expr, bind, cont)
             }
         })
@@ -456,26 +405,25 @@ impl Normalize {
         self.compile_match(mat, r, MExpr::Retn { arg1: Atom::Var(r) })
     }
 
-    fn compile_match(&mut self, mat: &PatnMatrix, hole: Ident, ctx: MExpr) -> MExpr {
+    fn compile_match(&mut self, mat: &PatnMatrix, hole: Ident, rest: MExpr) -> MExpr {
         if mat.is_empty() {
             panic!("pattern match not exhaustive!")
         } else if mat.first_row_aways_match() {
-            let cont = mat.acts[0].clone();
-            mat.matrix[0]
-                .iter()
-                .zip(mat.objs.iter())
-                .flat_map(|(patn, obj)| match patn {
-                    Pattern::Var { var, .. } => Some((var, obj)),
-                    Pattern::Lit { .. } => unreachable!(),
-                    Pattern::Cons { .. } => unreachable!(),
-                    Pattern::Wild { .. } => None,
-                })
-                .fold(cont, |cont, (var, obj)| MExpr::UnOp {
-                    bind: *var,
+            let (bindings, func, args) = mat.success();
+            bindings.into_iter().fold(
+                MExpr::Call {
+                    bind: hole,
+                    func: Atom::Var(func),
+                    args: args.into_iter().map(|x| Atom::Var(x)).collect(),
+                    cont: Box::new(rest),
+                },
+                |cont, (var, obj)| MExpr::UnOp {
+                    bind: var,
                     prim: UnOpPrim::Move,
-                    arg1: Atom::Var(*obj),
+                    arg1: Atom::Var(obj),
                     cont: Box::new(cont),
-                })
+                },
+            )
         } else {
             let j = self.get_best_col();
             match self.get_col_type(mat, j) {
@@ -483,16 +431,15 @@ impl Normalize {
                 ColType::Data(data) => {
                     let cons_set = mat.get_cons_set(j);
                     let mut exhaustive = true;
-                    let brchs = self.data_env[&data]
+                    let brchs = self.ctx.data_env[&data]
                         .cons
                         .clone()
                         .into_iter()
                         .enumerate()
-                        .into_iter()
                         .flat_map(|(i, cons)| {
                             if cons_set.contains(&cons) {
-                                let arity = self.cons_env[&cons].pars.len();
-                                Some((i, self.match_specialize(mat, j, cons, arity)))
+                                let res = self.match_specialize_cons(mat, j, &cons);
+                                Some((i, res))
                             } else {
                                 exhaustive = false;
                                 None
@@ -514,31 +461,95 @@ impl Normalize {
                             arg1: Atom::Var(t),
                             brchs,
                             dflt,
-                            cont: Box::new(ctx),
+                            cont: Box::new(rest),
                         }),
                     }
-                }
-                ColType::Lit(LitType::Int) => {
-                    todo!()
                 }
                 ColType::Lit(LitType::Real) => {
                     panic!("pattern match on real numbers are not allowed!");
                 }
-                ColType::Lit(LitType::Bool) => {
-                    todo!()
-                }
-                ColType::Lit(LitType::Char) => {
-                    todo!()
-                }
                 ColType::Lit(LitType::Unit) => {
-                    todo!()
+                    // no need to generating switch for Unit type
+                    self.match_specialize_lit(mat, j, LitVal::Unit)
+                }
+                ColType::Lit(_) => {
+                    let lit_set = mat.get_lit_set(j);
+                    let brchs = lit_set
+                        .into_iter()
+                        .flat_map(|lit| {
+                            let cont = self.match_specialize_lit(mat, j, lit);
+                            match lit {
+                                LitVal::Int(x) => Some((x as usize, cont)),
+                                LitVal::Real(_) => unreachable!(),
+                                LitVal::Bool(x) => Some((x as usize, cont)),
+                                LitVal::Char(x) => Some((x as usize, cont)),
+                                LitVal::Unit => unreachable!(),
+                            }
+                        })
+                        .collect();
+                    let dflt = Some(Box::new(self.match_default(mat, j)));
+                    MExpr::Switch {
+                        bind: hole,
+                        arg1: Atom::Var(mat.objs[j]),
+                        brchs,
+                        dflt,
+                        cont: Box::new(rest),
+                    }
                 }
             }
         }
     }
 
+    fn match_specialize_lit(&mut self, mat: &PatnMatrix, j: usize, lit: LitVal) -> MExpr {
+        let (new_mat, bindings) = mat.specialize_lit(j, lit);
+        let cont = self.compile_match_top(&new_mat);
+        bindings
+            .into_iter()
+            .fold(cont, |cont, (var, obj)| MExpr::UnOp {
+                bind: var,
+                prim: UnOpPrim::Move,
+                arg1: Atom::Var(obj),
+                cont: Box::new(cont),
+            })
+    }
+
+    fn match_specialize_cons(&mut self, mat: &PatnMatrix, j: usize, cons: &Ident) -> MExpr {
+        let arity = self.ctx.cons_env[cons].flds.len();
+        let (new_mat, new_objs, bindings) = mat.specialize_cons(j, cons, arity);
+        let cont = self.compile_match_top(&new_mat);
+        let cont = new_objs
+            .into_iter()
+            .enumerate()
+            .fold(cont, |cont, (i, obj)| MExpr::Load {
+                bind: obj,
+                arg1: Atom::Var(mat.objs[j]),
+                index: i + 1,
+                cont: Box::new(cont),
+            });
+        bindings
+            .into_iter()
+            .fold(cont, |cont, (var, obj)| MExpr::UnOp {
+                bind: var,
+                prim: UnOpPrim::Move,
+                arg1: Atom::Var(obj),
+                cont: Box::new(cont),
+            })
+    }
+
+    fn match_default(&mut self, mat: &PatnMatrix, j: usize) -> MExpr {
+        let (new_mat, bindings) = mat.default(j);
+        let cont = self.compile_match_top(&new_mat);
+        bindings
+            .into_iter()
+            .fold(cont, |cont, (var, obj)| MExpr::UnOp {
+                bind: var,
+                prim: UnOpPrim::Move,
+                arg1: Atom::Var(obj),
+                cont: Box::new(cont),
+            })
+    }
+
     fn get_best_col(&self) -> usize {
-        // let mut counts = Vec::with_capacity(self.get_col_num());
         // todo: better hueristic
         0
     }
@@ -560,12 +571,12 @@ impl Normalize {
                     }
                 },
                 Pattern::Cons { cons, .. } => match res {
-                    ColType::Any => res = ColType::Data(self.cons_env[&cons].data),
+                    ColType::Any => res = ColType::Data(self.ctx.cons_env[cons].data),
                     ColType::Lit(_) => {
                         panic!("pattern match not well-typed!")
                     }
                     ColType::Data(data) => {
-                        if data != self.cons_env[&cons].data {
+                        if data != self.ctx.cons_env[cons].data {
                             panic!("pattern match not well-typed!")
                         }
                     }
@@ -575,209 +586,12 @@ impl Normalize {
         }
         res
     }
-
-    fn match_specialize(&mut self, mat: &PatnMatrix, j: usize, cons: Ident, arity: usize) -> MExpr {
-        let matchee = mat.objs[j];
-        let new_objs: Vec<Ident> = (0..arity).map(|_| Ident::generate('o')).collect();
-        let mut bindings: Vec<(Ident, Ident)> = Vec::new();
-
-        let (matrix, acts): (Vec<Vec<_>>, _) = mat
-            .matrix
-            .iter()
-            .zip(mat.acts.iter())
-            .flat_map(|(row, act)| match &row[j] {
-                Pattern::Lit { .. } => {
-                    unreachable!()
-                }
-                Pattern::Var { var, span } => {
-                    let new = row[..j]
-                        .iter()
-                        .chain(std::iter::repeat(&Pattern::Wild { span: *span }).take(arity))
-                        .chain(row[j + 1..].iter())
-                        .cloned()
-                        .collect();
-                    bindings.push((*var, matchee));
-                    Some((new, act.clone()))
-                }
-                Pattern::Cons {
-                    cons: cons2, pars, ..
-                } if *cons2 == cons => {
-                    assert_eq!(pars.len(), arity);
-                    let new = row[..j]
-                        .iter()
-                        .chain(pars.iter())
-                        .chain(row[j + 1..].iter())
-                        .cloned()
-                        .collect();
-                    Some((new, act.clone()))
-                }
-                Pattern::Cons { .. } => None,
-                Pattern::Wild { span } => {
-                    let new = row[..j]
-                        .iter()
-                        .chain(std::iter::repeat(&Pattern::Wild { span: *span }).take(arity))
-                        .chain(row[j + 1..].iter())
-                        .cloned()
-                        .collect();
-                    Some((new, act.clone()))
-                }
-            })
-            .unzip();
-
-        let objs = mat.objs[..j]
-            .iter()
-            .chain(new_objs.iter())
-            .chain(mat.objs[j + 1..].iter())
-            .cloned()
-            .collect();
-
-        let new_mat = PatnMatrix { objs, matrix, acts };
-        let cont = self.compile_match_top(&new_mat);
-
-        let cont = bindings
-            .into_iter()
-            .fold(cont, |cont, (var, obj)| MExpr::UnOp {
-                bind: var,
-                prim: UnOpPrim::Move,
-                arg1: Atom::Var(obj),
-                cont: Box::new(cont),
-            });
-
-        let cont = new_objs
-            .into_iter()
-            .enumerate()
-            .fold(cont, |cont, (i, obj)| MExpr::Load {
-                bind: obj,
-                arg1: Atom::Var(matchee),
-                index: i + 1,
-                cont: Box::new(cont),
-            });
-
-        cont
-    }
-
-    fn match_default(&mut self, mat: &PatnMatrix, j: usize) -> MExpr {
-        let matchee = mat.objs[j];
-        let mut bindings: Vec<(Ident, Ident)> = Vec::new();
-
-        let (matrix, acts): (Vec<Vec<_>>, _) = mat
-            .matrix
-            .iter()
-            .zip(mat.acts.iter())
-            .flat_map(|(row, act)| match &row[j] {
-                Pattern::Lit { .. } => None,
-                Pattern::Var { var, .. } => {
-                    let new = row[..j]
-                        .iter()
-                        .chain(row[j + 1..].iter())
-                        .cloned()
-                        .collect();
-                    bindings.push((*var, matchee));
-                    Some((new, act.clone()))
-                }
-                Pattern::Cons { .. } => None,
-                Pattern::Wild { .. } => {
-                    let new = row[..j]
-                        .iter()
-                        .chain(row[j + 1..].iter())
-                        .cloned()
-                        .collect();
-                    Some((new, act.clone()))
-                }
-            })
-            .unzip();
-
-        let objs = mat.objs[..j]
-            .iter()
-            .chain(mat.objs[j + 1..].iter())
-            .cloned()
-            .collect();
-
-        let new_mat = PatnMatrix { objs, matrix, acts };
-        let cont = self.compile_match_top(&new_mat);
-
-        let cont = bindings
-            .into_iter()
-            .fold(cont, |cont, (var, obj)| MExpr::UnOp {
-                bind: var,
-                prim: UnOpPrim::Move,
-                arg1: Atom::Var(obj),
-                cont: Box::new(cont),
-            });
-
-        cont
-    }
-}
-
-fn subst(expr: MExpr, hole: Ident, atom: Atom) -> MExpr {
-    // subst(expr,hole,atom) ~=~ let hole = move(atom); expr
-    // it will be substituted in constant-fold pass anyway
-    MExpr::UnOp {
-        bind: hole,
-        prim: UnOpPrim::Move,
-        arg1: atom,
-        cont: Box::new(expr),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ColType {
-    Any,
-    Data(Ident),
-    Lit(LitType),
-}
-
-// assume that more than one row and more than one column
-#[derive(Debug, Clone)]
-pub struct PatnMatrix {
-    objs: Vec<Ident>,
-    matrix: Vec<Vec<Pattern>>,
-    acts: Vec<MExpr>,
-}
-
-impl PatnMatrix {
-    #[allow(dead_code)]
-    fn get_row_num(&self) -> usize {
-        self.matrix.len()
-    }
-    #[allow(dead_code)]
-    fn get_col_num(&self) -> usize {
-        if self.matrix.is_empty() {
-            return 0;
-        }
-        let res = self.matrix[0].len();
-        for row in &self.matrix[1..] {
-            assert_eq!(row.len(), res);
-        }
-        res
-    }
-    fn is_empty(&self) -> bool {
-        self.matrix.is_empty()
-    }
-    fn first_row_aways_match(&self) -> bool {
-        assert!(!self.matrix.is_empty());
-        self.matrix[0].iter().all(|p| p.is_wild_or_var())
-    }
-
-    fn get_cons_set(&self, j: usize) -> HashSet<Ident> {
-        let mut set = HashSet::new();
-        for row in self.matrix.iter() {
-            match &row[j] {
-                Pattern::Lit { .. } => {}
-                Pattern::Var { .. } => {}
-                Pattern::Cons { cons, .. } => {
-                    set.insert(*cons);
-                }
-                Pattern::Wild { .. } => {}
-            }
-        }
-        set
-    }
 }
 
 #[test]
 fn normalize_test() {
     use super::anf_build::*;
+    use crate::frontend::infer::Infer;
     use crate::frontend::parser::*;
     use crate::frontend::renamer::Renamer;
 
@@ -787,7 +601,8 @@ fn normalize_test() {
     let mut par = Parser::new(string);
     let mut expr1 = parse_expr(&mut par).unwrap();
     Renamer::run(&mut expr1).unwrap();
-    let expr1 = Normalize::run(&expr1);
+    let ctx = Infer::run(&expr1).unwrap();
+    let expr1 = Normalize::run(&expr1, &ctx);
     let expr2 = chain(vec![
         _move("x1", i(4)),
         _move("x2", i(3)),
@@ -811,7 +626,8 @@ fn normalize_test() {
     let mut par = Parser::new(string);
     let mut expr1 = parse_expr(&mut par).unwrap();
     Renamer::run(&mut expr1).unwrap();
-    let expr1 = Normalize::run(&expr1);
+    let ctx = Infer::run(&expr1).unwrap();
+    let expr1 = Normalize::run(&expr1, &ctx);
     let expr2 = let_in(
         vec![fun(
             "f1",
@@ -838,6 +654,7 @@ fn normalize_test() {
 
 #[test]
 fn normalize_pattern_match_test() {
+    use crate::frontend::infer::Infer;
     use crate::frontend::parser::*;
     use crate::frontend::renamer::Renamer;
     let string = r#"
@@ -858,7 +675,8 @@ end
     let mut par = Parser::new(string);
     let mut expr1 = parse_expr(&mut par).unwrap();
     Renamer::run(&mut expr1).unwrap();
-    // println!("{expr1:#?}");
-    let _expr1 = Normalize::run(&expr1);
-    // println!("{expr1}");
+    println!("{expr1:#?}");
+    let ctx = Infer::run(&expr1).unwrap();
+    let expr1 = Normalize::run(&expr1, &ctx);
+    println!("{expr1}");
 }
